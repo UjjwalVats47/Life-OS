@@ -4,6 +4,11 @@ import { createId } from "@/lib/ids";
 import { nowIso } from "@/lib/dates";
 import { generateEventPrepPlan } from "@/system/events/eventPrepEngine";
 import { getBaseXp } from "@/system/gamification/xpEngine";
+import {
+  createCalendarImportPreview,
+  parseIcsCalendar,
+  type CalendarImportPreview
+} from "@/system/calendar/calendarImportEngine";
 import type { EventPrepItem, LifeEvent, TaskTemplate } from "@/types/domain";
 import type { LifeDomain, StatName } from "@/types/enums";
 
@@ -25,7 +30,7 @@ export async function loadEventsDashboard() {
 }
 
 export async function addEvent(
-  input: Pick<LifeEvent, "eventDate" | "eventType" | "importance" | "title">
+  input: Pick<LifeEvent, "details" | "eventDate" | "eventType" | "importance" | "title">
 ) {
   const timestamp = nowIso();
   const userId = defaultUserProfileId;
@@ -51,6 +56,24 @@ export async function addEvent(
     await db.events.put(event);
     await db.eventPrepItems.bulkPut(prepItems);
   });
+}
+
+export async function previewCalendarImport(text: string) {
+  const userId = defaultUserProfileId;
+  const importedItems = parseIcsCalendar(text);
+  const [scheduleBlocks, commitments, events] = await Promise.all([
+    db.scheduleBlocks.where("userId").equals(userId).toArray(),
+    db.commitments.where("userId").equals(userId).toArray(),
+    db.events.where("userId").equals(userId).toArray()
+  ]);
+
+  return createCalendarImportPreview({ commitments, events, importedItems, scheduleBlocks });
+}
+
+export async function approveCalendarImport(preview: CalendarImportPreview[]) {
+  for (const item of preview) {
+    await addEvent(item.suggestedEvent);
+  }
 }
 
 export async function updatePrepItem(

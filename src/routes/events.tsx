@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
-import { CalendarPlus, Check, Save } from "lucide-react";
+import { AlertTriangle, CalendarPlus, Check, Save, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   addEvent,
+  approveCalendarImport,
   loadEventsDashboard,
+  previewCalendarImport,
   updatePrepItem
 } from "@/features/events/eventsService";
 import type { LifeEvent } from "@/types/domain";
 
 type EventsState = Awaited<ReturnType<typeof loadEventsDashboard>>;
+type CalendarPreview = Awaited<ReturnType<typeof previewCalendarImport>>;
 const fieldClass =
   "h-10 w-full border border-systemBlue/25 bg-black/35 px-3 text-sm text-slate-100 outline-none focus:border-systemBlue/70";
+const textareaClass = `${fieldClass} h-auto min-h-32 py-3 leading-6`;
 
 export function EventsRoute() {
   const [state, setState] = useState<EventsState>([]);
@@ -20,6 +24,8 @@ export function EventsRoute() {
   const [eventDate, setEventDate] = useState(
     new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10)
   );
+  const [calendarText, setCalendarText] = useState("");
+  const [calendarPreview, setCalendarPreview] = useState<CalendarPreview>([]);
   const [message, setMessage] = useState("");
   const refresh = useCallback(() => loadEventsDashboard().then(setState), []);
 
@@ -35,6 +41,30 @@ export function EventsRoute() {
     await addEvent({ eventDate, eventType, importance, title: title.trim() });
     setTitle("");
     setMessage("Event and draft preparation plan created.");
+    await refresh();
+  }
+
+  async function runCalendarPreview() {
+    if (!calendarText.trim()) {
+      setMessage("Paste calendar .ics text before preview.");
+      return;
+    }
+
+    const preview = await previewCalendarImport(calendarText);
+    setCalendarPreview(preview);
+    setMessage(preview.length ? `${preview.length} calendar items ready for review.` : "No calendar events found.");
+  }
+
+  async function approveImportedEvents() {
+    if (!calendarPreview.length) {
+      setMessage("Preview calendar items before approving.");
+      return;
+    }
+
+    await approveCalendarImport(calendarPreview);
+    setCalendarText("");
+    setCalendarPreview([]);
+    setMessage("Calendar items imported as Life OS events.");
     await refresh();
   }
 
@@ -80,6 +110,42 @@ export function EventsRoute() {
         </div>
       </section>
 
+      <section className="system-panel p-4">
+        <div className="system-panel-content">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="system-label text-[10px]">Calendar import</p>
+            <div className="flex gap-2">
+              <Button className="h-9 px-3 text-[10px]" onClick={runCalendarPreview} variant="ghost">
+                <Upload className="mr-2 size-3.5" />
+                Preview
+              </Button>
+              <Button
+                className="h-9 px-3 text-[10px]"
+                disabled={!calendarPreview.length}
+                onClick={approveImportedEvents}
+                variant="secondary"
+              >
+                <Check className="mr-2 size-3.5" />
+                Import selected
+              </Button>
+            </div>
+          </div>
+          <textarea
+            className={`${textareaClass} mt-4`}
+            onChange={(event) => setCalendarText(event.target.value)}
+            placeholder="Paste .ics calendar text"
+            value={calendarText}
+          />
+          {calendarPreview.length ? (
+            <div className="mt-4 grid gap-2">
+              {calendarPreview.map((item) => (
+                <CalendarPreviewRow item={item} key={`${item.sourceId ?? item.title}-${item.startDate}-${item.startTime ?? ""}`} />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </section>
+
       <div className="space-y-4">
         {state.map(({ event, prepItems }) => (
           <section className="system-panel p-4" key={event.id}>
@@ -110,6 +176,44 @@ export function EventsRoute() {
         {!state.length ? <div className="system-panel p-6 text-center text-[12px] text-slate-600">No events recorded.</div> : null}
       </div>
     </section>
+  );
+}
+
+function CalendarPreviewRow({ item }: { item: CalendarPreview[number] }) {
+  return (
+    <article className="grid gap-3 border border-systemBlue/15 bg-black/25 p-3 md:grid-cols-[1fr_auto]">
+      <div>
+        <p className="text-sm font-semibold text-slate-100">{item.title}</p>
+        <p className="mt-1 text-[10px] uppercase tracking-[0.1em] text-slate-500">
+          {item.startDate}
+          {item.startTime ? ` | ${item.startTime}${item.endTime ? `-${item.endTime}` : ""}` : ""}
+          {" | "}
+          {item.suggestedEvent.eventType.split("_").join(" ")}
+        </p>
+        {item.conflicts.length ? (
+          <div className="mt-3 space-y-1">
+            {item.conflicts.map((conflict) => (
+              <p
+                className="flex items-center gap-2 text-[11px] leading-5 text-amber-200"
+                key={`${conflict.conflictType}-${conflict.conflictingTitle}`}
+              >
+                <AlertTriangle className="size-3.5 shrink-0" />
+                {conflict.message}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </div>
+      <span
+        className={`h-fit border px-3 py-1 text-[10px] uppercase tracking-[0.12em] ${
+          item.conflicts.length
+            ? "border-amber-400/30 bg-amber-400/10 text-amber-200"
+            : "border-systemGreen/30 bg-systemGreen/10 text-systemGreen"
+        }`}
+      >
+        {item.conflicts.length ? `${item.conflicts.length} conflict${item.conflicts.length > 1 ? "s" : ""}` : "clear"}
+      </span>
+    </article>
   );
 }
 
