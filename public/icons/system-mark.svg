@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Life OS icon">
+  <rect width="512" height="512" rx="96" fill="#05070d"/>
+  <path d="M256 64 384 128v104c0 86-50 164-128 216-78-52-128-130-128-216V128L256 64Z" fill="#0c1220" stroke="#a78bfa" stroke-width="18"/>
+  <path d="M256 139v234M181 204h150M181 288h150" stroke="#ddd6fe" stroke-width="22" stroke-linecap="round"/>
+</svg>
