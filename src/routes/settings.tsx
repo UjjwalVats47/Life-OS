@@ -19,25 +19,39 @@ import {
   serializeLifeOsExport
 } from "@/lib/exportImport";
 import { syncWorkItemsFromExistingData } from "@/system/work/workItemEngine";
+import {
+  checkOllamaConnection,
+  type OllamaConnection
+} from "@/system/ai/ollamaGoalTaskAdapter";
 
 export function SettingsRoute() {
   const [pwaStatus, setPwaStatus] = useState<PwaStatus>();
   const [aiSettings, setAiSettings] = useState<AiSettings>({
     externalAiEnabled: false,
-    mode: "rule_based"
+    localAiEnabled: false,
+    localModel: "phi3:latest",
+    mode: "rule_based",
+    ollamaBaseUrl: "http://127.0.0.1:11434"
   });
+  const [ollama, setOllama] = useState<OllamaConnection>({ available: false, models: [] });
   const [message, setMessage] = useState("");
   const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setPwaStatus(getPwaStatus());
-    void loadAiSettings().then(setAiSettings);
+    void loadAiSettings().then(async (settings) => {
+      setAiSettings(settings);
+      setOllama(await checkOllamaConnection(settings.ollamaBaseUrl));
+    });
   }, []);
 
   async function toggleExternalAi(enabled: boolean) {
     const nextSettings: AiSettings = {
       externalAiEnabled: enabled,
-      mode: enabled ? "external_ai" : "rule_based"
+      localAiEnabled: false,
+      localModel: aiSettings.localModel,
+      mode: enabled ? "external_ai" : "rule_based",
+      ollamaBaseUrl: aiSettings.ollamaBaseUrl
     };
     await saveAiSettings(nextSettings);
     setAiSettings(nextSettings);
@@ -46,6 +60,36 @@ export function SettingsRoute() {
         ? "External AI is enabled as a preference only. No provider is connected yet."
         : "External AI is off. Rule-based local System behavior remains active."
     );
+  }
+
+  async function toggleLocalAi(enabled: boolean) {
+    if (!enabled) {
+      const nextSettings = { ...aiSettings, localAiEnabled: false, mode: "rule_based" as const };
+      await saveAiSettings(nextSettings);
+      setAiSettings(nextSettings);
+      setMessage("Local AI is off. Deterministic task generation remains active.");
+      return;
+    }
+
+    const connection = await checkOllamaConnection(aiSettings.ollamaBaseUrl);
+    setOllama(connection);
+    if (!connection.available || !connection.models.length) {
+      setMessage("Ollama is not reachable or has no installed model. Local AI was not enabled.");
+      return;
+    }
+    const localModel = connection.models.includes(aiSettings.localModel)
+      ? aiSettings.localModel
+      : connection.models[0];
+    const nextSettings: AiSettings = {
+      ...aiSettings,
+      externalAiEnabled: false,
+      localAiEnabled: true,
+      localModel,
+      mode: "local_ai"
+    };
+    await saveAiSettings(nextSettings);
+    setAiSettings(nextSettings);
+    setMessage(`Local task refinement enabled with ${localModel}. Personal context stays on this device.`);
   }
 
   async function enableNotifications() {
@@ -129,6 +173,30 @@ export function SettingsRoute() {
         </Panel>
 
         <Panel icon={<Brain className="size-5" />} title="AI Mode">
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-sm border border-systemGreen/20 bg-systemGreen/5 p-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-100">Local Ollama</p>
+              <p className="mt-1 text-[10px] text-slate-500">
+                {ollama.available ? ollama.models.join(", ") || "No models" : "Not connected"}
+              </p>
+            </div>
+            <button
+              aria-label="Toggle local Ollama"
+              className={`h-7 w-12 rounded-full border p-1 transition ${
+                aiSettings.localAiEnabled
+                  ? "border-systemGreen/60 bg-systemGreen/30"
+                  : "border-slate-600 bg-slate-900"
+              }`}
+              onClick={() => void toggleLocalAi(!aiSettings.localAiEnabled)}
+              type="button"
+            >
+              <span
+                className={`block size-4 rounded-full bg-slate-50 transition ${
+                  aiSettings.localAiEnabled ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
           <div className="flex items-center justify-between gap-3 rounded-sm border border-systemBlue/15 bg-black/25 p-3">
             <div>
               <p className="text-sm font-semibold text-slate-100">External AI</p>
@@ -149,7 +217,16 @@ export function SettingsRoute() {
               />
             </button>
           </div>
-          <StatusRow label="Current core" value={aiSettings.externalAiEnabled ? "external preference" : "rule based"} />
+          <StatusRow
+            label="Current core"
+            value={
+              aiSettings.localAiEnabled
+                ? `local ${aiSettings.localModel}`
+                : aiSettings.externalAiEnabled
+                  ? "external preference"
+                  : "rule based"
+            }
+          />
         </Panel>
 
         <Panel icon={<Download className="size-5" />} title="Local Data">

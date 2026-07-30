@@ -2,6 +2,10 @@ import { db } from "@/db/lifeOsDb";
 import { defaultUserProfileId } from "@/db/repositories/profileRepo";
 import { createId } from "@/lib/ids";
 import { nowIso } from "@/lib/dates";
+import {
+  advanceGoalPlanIfComplete,
+  rebuildTodayQuestBoard
+} from "@/features/goals/goalTaskPlanningService";
 import { getActiveRank, getUnlockedRank } from "@/system/gamification/rankEngine";
 import { calculateResetPoints } from "@/system/gamification/resetPointEngine";
 import { calculateStatAwards } from "@/system/gamification/statEngine";
@@ -27,6 +31,14 @@ export type QuestBoardSlotView = {
   activeAttempt?: TaskAttempt;
   options: QuestBoardOptionView[];
   slot: QuestSlot;
+};
+
+export type QuestCompletionDetails = {
+  actualMinutes?: number;
+  completionProof?: string;
+  difficultyFeedback?: TaskAttempt["difficultyFeedback"];
+  resultScore?: number;
+  resultSummary?: string;
 };
 
 export async function loadQuestBoard(): Promise<QuestBoardSlotView[]> {
@@ -60,7 +72,7 @@ export async function startQuest(slotId: string, optionId: string) {
 
   return db.transaction(
     "rw",
-    [db.questSlots, db.questSlotOptions, db.taskAttempts, db.workItems],
+    [db.questSlots, db.questSlotOptions, db.taskAttempts, db.taskTemplates, db.workItems],
     async () => {
       const slot = await db.questSlots.get(slotId);
       const option = await db.questSlotOptions.get(optionId);
@@ -68,6 +80,8 @@ export async function startQuest(slotId: string, optionId: string) {
       if (!slot || !option || option.questSlotId !== slotId) {
         throw new Error("Quest option is no longer available.");
       }
+      const template = await db.taskTemplates.get(option.taskTemplateId);
+      if (!template) throw new Error("Generated task details are unavailable.");
 
       const existing = await db.taskAttempts
         .where("userId")
@@ -88,8 +102,12 @@ export async function startQuest(slotId: string, optionId: string) {
         userId: slot.userId
       };
 
-      await db.questSlots.update(slotId, { status: "active", updatedAt: timestamp });
+      const selectedEndTime = addMinutes(slot.startTime, template.estimatedMinutes);
+      await db.questSlots.update(slotId, { endTime: selectedEndTime, status: "active", updatedAt: timestamp });
       await db.workItems.update(`work-quest_slot-${slotId}`, {
+        endTime: selectedEndTime,
+        plannedMinutes: template.estimatedMinutes,
+        preferredMinutes: template.estimatedMinutes,
         status: "started",
         updatedAt: timestamp
       });
@@ -113,10 +131,14 @@ export async function startQuest(slotId: string, optionId: string) {
   );
 }
 
-export async function finishQuest(attemptId: string, outcome: "completed" | "incomplete") {
+export async function finishQuest(
+  attemptId: string,
+  outcome: "completed" | "incomplete",
+  details: QuestCompletionDetails = {}
+) {
   const timestamp = nowIso();
 
-  return db.transaction(
+  const result = await db.transaction(
     "rw",
     [
       db.goals,
@@ -137,11 +159,23 @@ export async function finishQuest(attemptId: string, outcome: "completed" | "inc
       const template = await db.taskTemplates.get(attempt.taskTemplateId);
       const slot = await db.questSlots.get(attempt.questSlotId);
       if (!template || !slot) throw new Error("Quest data is incomplete.");
+      const completionProof = details.completionProof?.trim();
+      const resultSummary = details.resultSummary?.trim();
+      const actualMinutes = clampOptional(details.actualMinutes, 1, 720);
+      const resultScore = clampOptional(details.resultScore, 0, 100);
+
+      if (outcome === "completed" && template.goalPlanId && !completionProof) {
+        throw new Error("Generated actions require a short completion proof.");
+      }
 
       if (outcome === "incomplete") {
         await db.taskAttempts.update(attemptId, {
+          actualMinutes,
+          difficultyFeedback: details.difficultyFeedback,
           finishedAt: timestamp,
-          incompleteReason: "Marked incomplete by user",
+          incompleteReason: resultSummary || "Marked incomplete by user",
+          resultScore,
+          resultSummary,
           status: "incomplete",
           updatedAt: timestamp
         });
@@ -151,6 +185,7 @@ export async function finishQuest(attemptId: string, outcome: "completed" | "inc
           updatedAt: timestamp
         });
         await db.workItems.update(`work-task_template-${template.id}`, {
+          actualMinutes,
           status: "postponed",
           updatedAt: timestamp
         });
@@ -183,17 +218,24 @@ export async function finishQuest(attemptId: string, outcome: "completed" | "inc
       const resetPoints = calculateResetPoints(expectedResetPoints, xp, xp);
 
       await db.taskAttempts.update(attemptId, {
+        actualMinutes,
         completionTiming: "on_time",
+        completionProof,
+        difficultyFeedback: details.difficultyFeedback,
         finishedAt: timestamp,
+        resultScore,
+        resultSummary,
         status: "completed",
         updatedAt: timestamp
       });
       await db.questSlots.update(slot.id, { status: "completed", updatedAt: timestamp });
       await db.workItems.update(`work-quest_slot-${slot.id}`, {
+        actualMinutes,
         status: "completed",
         updatedAt: timestamp
       });
       await db.workItems.update(`work-task_template-${template.id}`, {
+        actualMinutes,
         status: "completed",
         updatedAt: timestamp
       });
@@ -266,6 +308,17 @@ export async function finishQuest(attemptId: string, outcome: "completed" | "inc
       return { resetPoints, statAwards, xp };
     }
   );
+
+  const completedAttempt = await db.taskAttempts.get(attemptId);
+  const completedTemplate = completedAttempt
+    ? await db.taskTemplates.get(completedAttempt.taskTemplateId)
+    : undefined;
+  const advanced =
+    outcome === "completed" && completedTemplate?.goalId
+      ? await advanceGoalPlanIfComplete(completedTemplate.goalId)
+      : false;
+  if (!advanced) await rebuildTodayQuestBoard();
+  return result;
 }
 
 export async function postponeQuest(
@@ -341,4 +394,15 @@ function getExpectedResetPoints(goal?: Goal, isHabit = false) {
   if (goal.system === "sys1") return 3;
   if (goal.importance === "critical") return 2;
   return 0;
+}
+
+function addMinutes(startTime: string, durationMinutes: number) {
+  const [hours, minutes] = startTime.split(":").map(Number);
+  const total = hours * 60 + minutes + durationMinutes;
+  return `${Math.floor(total / 60).toString().padStart(2, "0")}:${(total % 60).toString().padStart(2, "0")}`;
+}
+
+function clampOptional(value: number | undefined, minimum: number, maximum: number) {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }

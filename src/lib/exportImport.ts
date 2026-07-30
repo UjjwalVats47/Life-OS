@@ -5,7 +5,7 @@ import { nowIso } from "@/lib/dates";
 export type ExportEnvelope = {
   app: "life-os";
   exportedAt: string;
-  schemaVersion: typeof currentLocalDbVersion;
+  schemaVersion: number;
   version: 1;
   data: Record<string, unknown[]>;
 };
@@ -18,6 +18,7 @@ export const exportableTables = [
   "events",
   "financeEntries",
   "freeBlocks",
+  "goalActionPlans",
   "goals",
   "habits",
   "identityPaths",
@@ -71,6 +72,14 @@ export function parseLifeOsExport(rawJson: string): ExportEnvelope {
     throw new Error("This file is not a valid Life OS export.");
   }
 
+  if (parsed.schemaVersion === 2) {
+    return {
+      ...parsed,
+      data: { ...parsed.data, goalActionPlans: [] },
+      schemaVersion: currentLocalDbVersion
+    };
+  }
+
   if (parsed.schemaVersion !== currentLocalDbVersion) {
     throw new Error(`Export schema ${parsed.schemaVersion} cannot be restored into schema ${currentLocalDbVersion}.`);
   }
@@ -109,10 +118,14 @@ function isExportEnvelope(value: unknown): value is ExportEnvelope {
   return (
     candidate.app === "life-os" &&
     candidate.version === 1 &&
-    candidate.schemaVersion === currentLocalDbVersion &&
+    (candidate.schemaVersion === 2 || candidate.schemaVersion === currentLocalDbVersion) &&
     typeof candidate.exportedAt === "string" &&
     Boolean(candidate.data) &&
     typeof candidate.data === "object" &&
-    exportableTables.every((tableName) => Array.isArray(candidate.data?.[tableName]))
+    exportableTables.every((tableName) =>
+      tableName === "goalActionPlans" && candidate.schemaVersion === 2
+        ? candidate.data?.[tableName] === undefined || Array.isArray(candidate.data?.[tableName])
+        : Array.isArray(candidate.data?.[tableName])
+    )
   );
 }

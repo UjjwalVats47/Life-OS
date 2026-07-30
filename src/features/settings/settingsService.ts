@@ -5,7 +5,10 @@ import type { AiMode } from "@/types/enums";
 
 export type AiSettings = {
   externalAiEnabled: boolean;
+  localAiEnabled: boolean;
+  localModel: string;
   mode: AiMode;
+  ollamaBaseUrl: string;
 };
 
 export type PwaStatus = {
@@ -25,7 +28,10 @@ export async function loadAiSettings(): Promise<AiSettings> {
 
   return {
     externalAiEnabled: false,
-    mode: "rule_based"
+    localAiEnabled: false,
+    localModel: "phi3:latest",
+    mode: "rule_based",
+    ollamaBaseUrl: "http://127.0.0.1:11434"
   };
 }
 
@@ -39,7 +45,10 @@ export async function saveAiSettings(settings: AiSettings) {
     updatedAt: timestamp,
     value: {
       externalAiEnabled: settings.externalAiEnabled,
-      mode: settings.externalAiEnabled ? settings.mode : "rule_based"
+      localAiEnabled: settings.localAiEnabled,
+      localModel: settings.localModel,
+      mode: settings.localAiEnabled ? "local_ai" : settings.externalAiEnabled ? "external_ai" : "rule_based",
+      ollamaBaseUrl: settings.ollamaBaseUrl
     }
   });
 }
@@ -132,10 +141,13 @@ function nextSundayAt(hours: number, minutes: number) {
 function isAiSettings(value: unknown): value is AiSettings {
   if (!value || typeof value !== "object") return false;
 
-  return (
-    "externalAiEnabled" in value &&
-    "mode" in value &&
-    typeof value.externalAiEnabled === "boolean" &&
-    (value.mode === "rule_based" || value.mode === "local_ai" || value.mode === "external_ai")
-  );
+  if (!("externalAiEnabled" in value) || !("mode" in value)) return false;
+  if (typeof value.externalAiEnabled !== "boolean") return false;
+  if (value.mode !== "rule_based" && value.mode !== "local_ai" && value.mode !== "external_ai") return false;
+
+  const settings = value as Partial<AiSettings>;
+  settings.localAiEnabled = settings.localAiEnabled ?? false;
+  settings.localModel = settings.localModel ?? "phi3:latest";
+  settings.ollamaBaseUrl = settings.ollamaBaseUrl ?? "http://127.0.0.1:11434";
+  return true;
 }

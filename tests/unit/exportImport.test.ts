@@ -7,13 +7,14 @@ import {
   serializeLifeOsExport,
   type ExportEnvelope
 } from "@/lib/exportImport";
+import { currentLocalDbVersion } from "@/db/migrations";
 
 function makeEnvelope(overrides: Partial<ExportEnvelope> = {}): ExportEnvelope {
   return {
     app: "life-os",
     data: Object.fromEntries(exportableTables.map((tableName) => [tableName, []])),
     exportedAt: "2026-07-29T00:00:00.000Z",
-    schemaVersion: 2,
+    schemaVersion: currentLocalDbVersion,
     version: 1,
     ...overrides
   };
@@ -33,9 +34,20 @@ describe("exportImport", () => {
 
   it("rejects non-Life OS files and schema mismatches", () => {
     expect(() => parseLifeOsExport("{}")).toThrow("valid Life OS export");
-    expect(() => parseLifeOsExport(JSON.stringify(makeEnvelope({ schemaVersion: 999 as 2 })))).toThrow(
+    expect(() => parseLifeOsExport(JSON.stringify(makeEnvelope({ schemaVersion: 999 })))).toThrow(
       "valid Life OS export"
     );
+  });
+
+  it("upgrades schema 2 backups by adding an empty goal action plan collection", () => {
+    const oldData = { ...makeEnvelope().data };
+    delete oldData.goalActionPlans;
+    const restored = parseLifeOsExport(
+      JSON.stringify(makeEnvelope({ data: oldData, schemaVersion: 2 }))
+    );
+
+    expect(restored.schemaVersion).toBe(currentLocalDbVersion);
+    expect(restored.data.goalActionPlans).toEqual([]);
   });
 
   it("creates filesystem-safe backup names", () => {

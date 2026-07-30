@@ -18,6 +18,12 @@ export function QuestBoard() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<{ option: QuestBoardOptionView; slotId: string }>();
   const [finishingAttemptId, setFinishingAttemptId] = useState<string>();
+  const [finishActualMinutes, setFinishActualMinutes] = useState("");
+  const [finishDifficulty, setFinishDifficulty] = useState<"too_easy" | "right" | "too_hard">("right");
+  const [finishError, setFinishError] = useState("");
+  const [finishProof, setFinishProof] = useState("");
+  const [finishScore, setFinishScore] = useState("");
+  const [finishSummary, setFinishSummary] = useState("");
   const [postponeSlotId, setPostponeSlotId] = useState<string>();
   const [postponeReason, setPostponeReason] = useState("");
   const [replacementType, setReplacementType] = useState<"ordinary" | "emergency" | "recovery">("ordinary");
@@ -46,15 +52,45 @@ export function QuestBoard() {
   async function confirmFinish(outcome: "completed" | "incomplete") {
     if (!finishingAttemptId) return;
     setBusy(true);
-    const earned = await finishQuest(finishingAttemptId, outcome);
-    setResult(
-      outcome === "completed"
-        ? `Quest complete: +${earned.xp} XP, +${earned.resetPoints} reset points.`
-        : "Attempt recorded as incomplete. The quest remains available."
-    );
-    setFinishingAttemptId(undefined);
-    await refresh();
-    setBusy(false);
+    setFinishError("");
+    try {
+      const earned = await finishQuest(finishingAttemptId, outcome, {
+        actualMinutes: finishActualMinutes ? Number(finishActualMinutes) : undefined,
+        completionProof: finishProof,
+        difficultyFeedback: finishDifficulty,
+        resultScore: finishScore ? Number(finishScore) : undefined,
+        resultSummary: finishSummary
+      });
+      setResult(
+        outcome === "completed"
+          ? `Quest complete: +${earned.xp} XP, +${earned.resetPoints} reset points.`
+          : "Attempt recorded as incomplete. The quest remains available."
+      );
+      setFinishingAttemptId(undefined);
+      resetFinishEvidence();
+      await refresh();
+    } catch (error) {
+      setFinishError(error instanceof Error ? error.message : "The result could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function beginFinish(view: QuestBoardSlotView) {
+    if (!view.activeAttempt) return;
+    const activeTemplate = view.options.find((option) => option.option.status === "selected")?.template;
+    setFinishActualMinutes(String(activeTemplate?.estimatedMinutes ?? ""));
+    setFinishError("");
+    setFinishingAttemptId(view.activeAttempt.id);
+  }
+
+  function resetFinishEvidence() {
+    setFinishActualMinutes("");
+    setFinishDifficulty("right");
+    setFinishError("");
+    setFinishProof("");
+    setFinishScore("");
+    setFinishSummary("");
   }
 
   async function confirmPostpone() {
@@ -124,7 +160,7 @@ export function QuestBoard() {
                     <p className="text-[10px] uppercase tracking-[0.14em] text-systemGreen">Quest active</p>
                     <p className="mt-1 text-xs text-slate-300">Execution timer started locally.</p>
                   </div>
-                  <Button onClick={() => setFinishingAttemptId(view.activeAttempt?.id)}>
+                  <Button onClick={() => beginFinish(view)}>
                     <CheckCircle2 className="mr-2 size-4" />
                     Finish
                   </Button>
@@ -173,12 +209,81 @@ export function QuestBoard() {
       ) : null}
 
       {finishingAttemptId ? (
-        <Dialog onClose={() => !busy && setFinishingAttemptId(undefined)} title="Finish quest">
-          <p className="text-[13px] leading-6 text-slate-300">
-            Record the real outcome. Incomplete attempts remain behavioral evidence and return the quest to pending.
-          </p>
+        <Dialog
+          onClose={() => {
+            if (!busy) {
+              setFinishingAttemptId(undefined);
+              resetFinishEvidence();
+            }
+          }}
+          title="Finish quest"
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              Actual minutes
+              <input
+                className="h-10 border border-systemBlue/25 bg-black/35 px-3 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
+                min="1"
+                onChange={(event) => setFinishActualMinutes(event.target.value)}
+                type="number"
+                value={finishActualMinutes}
+              />
+            </label>
+            <label className="grid gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              Felt difficulty
+              <select
+                className="h-10 border border-systemBlue/25 bg-black/35 px-3 text-sm normal-case tracking-normal text-slate-100"
+                onChange={(event) => setFinishDifficulty(event.target.value as typeof finishDifficulty)}
+                value={finishDifficulty}
+              >
+                <option value="too_easy">Too easy</option>
+                <option value="right">Right level</option>
+                <option value="too_hard">Too hard</option>
+              </select>
+            </label>
+          </div>
+          <label className="mt-3 grid gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            Completion proof
+            <textarea
+              className="min-h-20 w-full border border-systemBlue/25 bg-black/35 p-3 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
+              onChange={(event) => setFinishProof(event.target.value)}
+              placeholder="What proves completion? Score, saved file, output, count, or result."
+              value={finishProof}
+            />
+          </label>
+          <div className="mt-3 grid gap-3 sm:grid-cols-[120px_1fr]">
+            <label className="grid gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              Score %
+              <input
+                className="h-10 border border-systemBlue/25 bg-black/35 px-3 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
+                max="100"
+                min="0"
+                onChange={(event) => setFinishScore(event.target.value)}
+                type="number"
+                value={finishScore}
+              />
+            </label>
+            <label className="grid gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+              Result note
+              <input
+                className="h-10 border border-systemBlue/25 bg-black/35 px-3 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
+                onChange={(event) => setFinishSummary(event.target.value)}
+                placeholder="Mistake, blocker, or useful observation"
+                type="text"
+                value={finishSummary}
+              />
+            </label>
+          </div>
+          {finishError ? <p className="mt-3 text-[11px] text-systemRed">{finishError}</p> : null}
           <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <Button disabled={busy} onClick={() => setFinishingAttemptId(undefined)} variant="ghost">
+            <Button
+              disabled={busy}
+              onClick={() => {
+                setFinishingAttemptId(undefined);
+                resetFinishEvidence();
+              }}
+              variant="ghost"
+            >
               Back
             </Button>
             <Button disabled={busy} onClick={() => confirmFinish("incomplete")} variant="secondary">
@@ -274,12 +379,36 @@ function QuestDetail({ option }: { option: QuestBoardOptionView }) {
   return (
     <div className="space-y-3">
       <p className="text-base font-black uppercase tracking-[0.06em] text-slate-50">{option.template.title}</p>
-      <p className="text-[12px] leading-5 text-slate-400">{option.option.systemReason}</p>
+      <p className="text-[12px] leading-5 text-slate-400">
+        {option.template.description ?? option.option.systemReason}
+      </p>
       <div className="grid grid-cols-3 gap-2">
         <DetailMetric label="Base XP" value={String(option.template.baseXp)} />
         <DetailMetric label="Duration" value={`${option.template.estimatedMinutes}m`} />
         <DetailMetric label="Category" value={option.template.category} />
       </div>
+      {option.template.instructions?.length ? (
+        <div className="border border-systemBlue/15 bg-black/25 p-3">
+          <p className="text-[9px] uppercase tracking-[0.14em] text-systemViolet">Execution</p>
+          <ol className="mt-2 space-y-2 text-[11px] leading-5 text-slate-300">
+            {option.template.instructions.map((instruction, index) => (
+              <li key={instruction}>{index + 1}. {instruction}</li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+      {option.template.resourceQuery ? (
+        <div className="border border-systemBlue/15 bg-systemBlue/5 p-3">
+          <p className="text-[9px] uppercase tracking-[0.14em] text-systemCyan">Resource query</p>
+          <p className="mt-2 text-[11px] leading-5 text-slate-200">{option.template.resourceQuery}</p>
+        </div>
+      ) : null}
+      {option.template.completionEvidence ? (
+        <div className="border border-systemGreen/20 bg-systemGreen/5 p-3">
+          <p className="text-[9px] uppercase tracking-[0.14em] text-systemGreen">Completion proof</p>
+          <p className="mt-2 text-[11px] leading-5 text-slate-200">{option.template.completionEvidence}</p>
+        </div>
+      ) : null}
     </div>
   );
 }

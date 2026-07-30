@@ -6,6 +6,7 @@ export type {
   FinanceEntry,
   FreeBlock,
   Goal,
+  GoalActionPlan,
   Habit,
   IdentityPath,
   LifeEvent,

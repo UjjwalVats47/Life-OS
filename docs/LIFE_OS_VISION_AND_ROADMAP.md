@@ -6,7 +6,9 @@ This document turns the competitive research into a focused product direction. I
 
 ## 1. Product Vision
 
-**The System: Life OS is a private personal growth operating system that turns meaningful goals into identity-linked daily action, learns from real behavior, and explains how to adjust without making the user maintain a complicated productivity tool.**
+**The System: Life OS is a private personal growth operating system that decomposes meaningful goals into concrete, verifiable real-world actions, schedules those actions within real constraints, learns from execution evidence, and improves the next actions without making the user maintain a complicated productivity tool.**
+
+A goal is never used as a task. "Become good at coding" is a direction. Valid System actions are concrete proofs such as finding a suitable question set, completing five questions under a timer, recording mistakes, repairing three defects, or completing code-typing drills. Identity change is the accumulated result of executing these generated actions.
 
 Life OS is not primarily:
 
@@ -174,10 +176,13 @@ Exit condition: the user can understand what the System observed, why it believe
 
 Purpose: expand evidence sources without compromising privacy or reliability.
 
-14. Calendar import adapter and conflict preview.
-15. Manual screen-time entry and ActivityWatch import research prototype.
-16. Encrypted backup design and recovery testing.
-17. Optional local/external AI improvements using explicit context selection.
+14. Calendar import adapter and conflict preview. **Foundation complete.**
+15. Goal-to-Action Intelligence Engine. **Deterministic, execution-evidence, cycle-adaptation, and optional Ollama foundations complete; personal calibration remains in progress.**
+16. Manual screen-time entry and ActivityWatch import research prototype.
+17. Encrypted backup design and recovery testing.
+18. Optional local/external AI improvements using explicit context selection.
+
+Milestone 15 takes priority over milestones 16-18. Its exit condition is not merely that the app can generate task titles. The System must interpret a goal, expose assumptions, identify capabilities and bottlenecks, generate specific actions with completion proof, respect dependencies, schedule only eligible work, capture result quality, and use that evidence to improve the next generation cycle. Optional Ollama support belongs inside this engine but may never become a requirement for core operation.
 
 ### V3 - Optional Advanced Platform
 

@@ -5,6 +5,27 @@ import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
   plugins: [
+    {
+      name: "life-os-dev-service-worker-cleanup",
+      apply: "serve",
+      configureServer(server) {
+        server.middlewares.use((request, response, next) => {
+          if (request.url !== "/sw.js") return next();
+          response.setHeader("Content-Type", "text/javascript");
+          response.end(`
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    self.registration.unregister().then(async () => {
+      const clients = await self.clients.matchAll({ type: "window" });
+      clients.forEach((client) => client.navigate(client.url));
+    })
+  );
+});
+`);
+        });
+      }
+    },
     react(),
     VitePWA({
       registerType: "autoUpdate",

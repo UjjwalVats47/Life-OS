@@ -9,7 +9,8 @@ This folder contains the product and technical planning documents for Life OS.
 3. `LIFE_OS_IMPLEMENTATION_PLAN.md` - implementation structure, schema, milestones, and testing plan.
 4. `LIFE_OS_ARCHITECTURE.md` - technical architecture and architecture diagram explanation.
 5. `LIFE_OS_VISION_AND_ROADMAP.md` - current roadmap after v1 and v2 direction.
-6. `LIFE_OS_COMPETITIVE_RESEARCH_2026.md` - research on similar products and lessons for Life OS.
+6. `GOAL_TO_ACTION_ENGINE.md` - core goal decomposition, action generation, scheduling, and adaptive intelligence contract.
+7. `LIFE_OS_COMPETITIVE_RESEARCH_2026.md` - research on similar products and lessons for Life OS.
 
 ## Reference Notes
 

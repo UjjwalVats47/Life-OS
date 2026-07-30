@@ -39,6 +39,9 @@ export type IdentityPath = BaseRecord & {
 };
 
 export type Goal = BaseRecord & {
+  availableResources?: string;
+  constraints?: string;
+  currentLevel?: string;
   deadlineAt?: string;
   description?: string;
   domain: LifeDomain;
@@ -50,9 +53,38 @@ export type Goal = BaseRecord & {
   reason: string;
   status: "active" | "paused" | "completed" | "failed" | "archived";
   system: "sys1" | "sys2";
+  targetOutcome?: string;
   timelineMonths?: number;
   title: string;
   userId: string;
+};
+
+export type GoalCapability = {
+  evidence: string;
+  key: string;
+  label: string;
+  priority: "critical" | "high" | "normal";
+  purpose: string;
+};
+
+export type GoalActionPlan = BaseRecord & {
+  archetype:
+    | "coding"
+    | "academic_exam"
+    | "career"
+    | "fitness"
+    | "social_confidence"
+    | "finance"
+    | "discipline"
+    | "generic_skill";
+  assumptions: string[];
+  capabilities: GoalCapability[];
+  goalId: string;
+  interpretation: string;
+  status: "active" | "outdated" | "archived";
+  successSignals: string[];
+  userId: string;
+  version: number;
 };
 
 export type ScheduleBlock = BaseRecord & {
@@ -106,17 +138,37 @@ export type TargetHabit = BaseRecord & {
 };
 
 export type TaskTemplate = BaseRecord & {
+  actionType?:
+    | "resource_setup"
+    | "baseline_assessment"
+    | "guided_practice"
+    | "timed_practice"
+    | "review_mistakes"
+    | "project_output"
+    | "supporting_skill"
+    | "real_world_exposure"
+    | "routine";
   baseXp: number;
+  capabilityKey?: string;
   category: "small" | "negotiable" | "critical" | "deadline_prep" | "phase3";
+  completionEvidence?: string;
+  dependencyTaskKeys?: string[];
   description?: string;
   difficulty: "easy" | "normal" | "hard" | "very_hard";
   domain: LifeDomain;
   estimatedMinutes: number;
   eventId?: string;
+  generationSource?: "deterministic" | "local_ai" | "external_ai";
   goalId?: string;
+  goalPlanId?: string;
   habitId?: string;
+  instructions?: string[];
+  resourceQuery?: string;
+  sequenceIndex?: number;
+  specificityScore?: number;
   statWeights: Partial<Record<StatName, number>>;
   status: "active" | "paused" | "archived";
+  taskKey?: string;
   title: string;
   userId: string;
 };
@@ -143,10 +195,15 @@ export type QuestSlotOption = BaseRecord & {
 };
 
 export type TaskAttempt = BaseRecord & {
+  actualMinutes?: number;
   completionTiming?: "early" | "on_time" | "late" | "repeated_postponement" | "phase3_negotiated";
+  completionProof?: string;
+  difficultyFeedback?: "too_easy" | "right" | "too_hard";
   finishedAt?: string;
   incompleteReason?: string;
   questSlotId: string;
+  resultScore?: number;
+  resultSummary?: string;
   skipReason?: string;
   startedAt?: string;
   status: "started" | "completed" | "incomplete" | "skipped" | "postponed" | "failed";

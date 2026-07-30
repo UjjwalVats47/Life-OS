@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("awakens a local protocol and completes the first quest", async ({ page }) => {
+  test.setTimeout(120_000);
   await page.goto("/awakening", { waitUntil: "domcontentloaded" });
 
   await page.getByLabel("System name").fill("Ujjwal");
@@ -28,12 +29,21 @@ test("awakens a local protocol and completes the first quest", async ({ page }) 
 
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByText(/protocol active/i)).toBeVisible();
+
+  await page.goto("/goals");
+  await expect(page.getByText("Action engine", { exact: true })).toBeVisible();
+  await expect(page.getByText(/practice set with solutions/i).first()).toBeVisible();
+
+  await page.goto("/dashboard");
   await page.getByRole("link", { name: "Open Quest Board" }).click();
 
   await expect(page.getByText("Option 1").first()).toBeVisible();
   await page.getByRole("button", { name: "Start", exact: true }).first().click();
   await page.getByRole("button", { name: "Yes, Start" }).click();
   await page.getByRole("button", { name: "Finish" }).click();
+  await page
+    .getByPlaceholder("What proves completion? Score, saved file, output, count, or result.")
+    .fill("Saved the selected resource and recorded the required result.");
   await page.getByRole("button", { name: "Completed" }).click();
   await expect(page.getByText(/Quest complete:/)).toBeVisible();
 
@@ -48,8 +58,7 @@ test("awakens a local protocol and completes the first quest", async ({ page }) 
 
   await page.goto("/goals");
   await expect(page.getByText(/Active identity/i)).toBeVisible();
-  await page.getByRole("button", { name: "+5%" }).first().click();
-  await expect(page.getByText("5% complete")).toBeVisible();
+  await expect(page.getByText(/current action cycle/i)).toBeVisible();
 
   await page.goto("/habits");
   await page.getByRole("button", { name: "Generate replacement" }).first().click();

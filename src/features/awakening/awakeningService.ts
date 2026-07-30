@@ -8,6 +8,7 @@ import { generateStarterHabits } from "@/system/habits/habitGenerationEngine";
 import { getBaseXp } from "@/system/gamification/xpEngine";
 import { detectFreeBlocks } from "@/system/scheduling/slotDetection";
 import { selectBestTaskOptions } from "@/system/tasks/taskGenerationEngine";
+import { generateGoalTaskIntelligence } from "@/system/tasks/goalTaskIntelligenceEngine";
 import { createFirstWeekProtocol } from "@/system/awakening/firstWeekProtocol";
 import { projectWorkItemsFromRecords } from "@/system/work/workItemEngine";
 import type {
@@ -15,6 +16,7 @@ import type {
   EventPrepItem,
   FreeBlock,
   Goal,
+  GoalActionPlan,
   Habit,
   IdentityPath,
   LifeEvent,
@@ -60,7 +62,11 @@ export async function activateAwakeningProtocol(draft: AwakeningDraft) {
     updatedAt: timestamp,
     userId
   }));
-  const taskTemplates = createTaskTemplates(goalRecords, habitRecords, userId, timestamp);
+  const goalTaskFoundation = createGoalTaskFoundation(goalRecords, userId, timestamp);
+  const taskTemplates = [
+    ...goalTaskFoundation.taskTemplates,
+    ...createHabitTaskTemplates(habitRecords, userId, timestamp)
+  ];
   const { questOptions, questSlots } = createInitialQuests(freeBlocks, taskTemplates, goalRecords, userId, timestamp);
   const events = createEvents(draft, userId, timestamp);
   const eventPrepItems = createEventPrepItems(events, userId, timestamp);
@@ -94,6 +100,7 @@ export async function activateAwakeningProtocol(draft: AwakeningDraft) {
       db.events,
       db.freeBlocks,
       db.goals,
+      db.goalActionPlans,
       db.habits,
       db.identityPaths,
       db.personalityProfiles,
@@ -112,6 +119,7 @@ export async function activateAwakeningProtocol(draft: AwakeningDraft) {
         db.events.where("userId").equals(userId).delete(),
         db.freeBlocks.where("userId").equals(userId).delete(),
         db.goals.where("userId").equals(userId).delete(),
+        db.goalActionPlans.where("userId").equals(userId).delete(),
         db.habits.where("userId").equals(userId).delete(),
         db.identityPaths.where("userId").equals(userId).delete(),
         db.personalityProfiles.where("userId").equals(userId).delete(),
@@ -182,6 +190,7 @@ export async function activateAwakeningProtocol(draft: AwakeningDraft) {
         db.eventPrepItems.bulkPut(eventPrepItems),
         db.events.bulkPut(events),
         db.freeBlocks.bulkPut(freeBlocks),
+        db.goalActionPlans.bulkPut(goalTaskFoundation.plans),
         db.goals.bulkPut(goalRecords),
         db.habits.bulkPut(habitRecords),
         db.identityPaths.bulkPut(identityRecords),
@@ -286,26 +295,38 @@ function createFreeBlocks(
   return records;
 }
 
-function createTaskTemplates(goals: Goal[], habits: Habit[], userId: string, timestamp: string) {
-  const goalTasks = goals.map<TaskTemplate>((goal) => {
-    const category = goal.level === "primary" ? "critical" : "negotiable";
-    return {
-      baseXp: getBaseXp(category),
-      category,
+function createGoalTaskFoundation(goals: Goal[], userId: string, timestamp: string) {
+  const plans: GoalActionPlan[] = [];
+  const taskTemplates: TaskTemplate[] = [];
+
+  for (const goal of goals) {
+    const generated = generateGoalTaskIntelligence({ goal, planVersion: 1 });
+    const planId = createId();
+    plans.push({
+      ...generated.plan,
       createdAt: timestamp,
-      difficulty: "normal",
-      domain: goal.domain,
-      estimatedMinutes: goal.level === "primary" ? 60 : 45,
-      goalId: goal.id,
-      id: createId(),
-      statWeights: statWeightsForDomain(goal.domain),
-      status: "active",
-      title: `Advance: ${goal.title}`,
+      id: planId,
       updatedAt: timestamp,
       userId
-    };
-  });
-  const habitTasks = habits.map<TaskTemplate>((habit) => ({
+    });
+    taskTemplates.push(
+      ...generated.tasks.map<TaskTemplate>((task) => ({
+        ...task,
+        createdAt: timestamp,
+        goalPlanId: planId,
+        id: createId(),
+        updatedAt: timestamp,
+        userId
+      }))
+    );
+  }
+
+  return { plans, taskTemplates };
+}
+
+function createHabitTaskTemplates(habits: Habit[], userId: string, timestamp: string) {
+  return habits.map<TaskTemplate>((habit) => ({
+    actionType: "routine",
     baseXp: getBaseXp("small"),
     category: "small",
     createdAt: timestamp,
@@ -320,8 +341,6 @@ function createTaskTemplates(goals: Goal[], habits: Habit[], userId: string, tim
     updatedAt: timestamp,
     userId
   }));
-
-  return [...goalTasks, ...habitTasks];
 }
 
 function createInitialQuests(
@@ -339,12 +358,13 @@ function createInitialQuests(
     .slice(0, 3);
   const questSlots: QuestSlot[] = [];
   const questOptions: QuestSlotOption[] = [];
+  const assignedTemplateIds = new Set<string>();
 
   for (const block of todayBlocks) {
     const slotId = createId();
     const slotMinutes = Math.min(90, toMinutes(block.endTime) - toMinutes(block.startTime));
     const options = selectBestTaskOptions(
-      templates.map((template) => {
+      templates.filter((template) => !template.dependencyTaskKeys?.length && !assignedTemplateIds.has(template.id)).map((template) => {
         const goal = goals.find((item) => item.id === template.goalId);
         return {
           deadlinePressure: goal?.level === "primary" ? 0.7 : 0.3,
@@ -361,6 +381,8 @@ function createInitialQuests(
     );
 
     if (!options.length) continue;
+
+    options.forEach((option) => assignedTemplateIds.add(option.id));
 
     questSlots.push({
       createdAt: timestamp,
