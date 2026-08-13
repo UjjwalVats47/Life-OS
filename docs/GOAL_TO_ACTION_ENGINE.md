@@ -1,6 +1,6 @@
 # Goal-to-Action Intelligence Engine
 
-Updated: 2026-07-30
+Updated: 2026-08-13
 
 ## Core Rule
 
@@ -37,16 +37,20 @@ Goal
 - Goal screen exposes the generated plan and supports regeneration.
 - Goal progress display is based on completed actions in the current cycle, not manual percentage buttons.
 - Optional Ollama refinement with explicit goal-only context, per-action validation, and deterministic fallback.
-- Versioned local persistence with schema-2 backup compatibility.
+- Persistent user feedback that separates a bad System suggestion from failed execution.
+- Reason-specific rejection handling: shorten, scaffold, increase challenge, replace unavailable resources, clarify, or suppress.
+- User-edited titles, durations, steps, and completion proof preserved across later cycles.
+- Completed or started action definitions remain immutable so historical execution evidence is not rewritten.
+- Local AI cannot overwrite explicit user edits or feedback-adjusted actions.
+- Versioned local persistence with schema-2 and schema-3 backup compatibility.
 
 ## Required Next Phases
 
-1. Add action rejection/edit feedback so the engine learns which generated actions are unsuitable and why.
-2. Add type-specific result evidence such as question count, accuracy, distance, repetition count, spending amount, artifact reference, and external feedback.
-3. Use schedule timing, repeated error categories, deadline trajectory, and prior action edits in the next-cycle generator.
-4. Expand domain knowledge packs and verify named external resources instead of inventing resource names.
-5. Add a long-term goal trajectory model so current-cycle completion does not falsely claim complete mastery.
-6. Validate local-model quality through personal use before allowing it to generate new action structures rather than refine deterministic candidates.
+1. Add type-specific result evidence such as question count, accuracy, distance, repetition count, spending amount, artifact reference, and external feedback.
+2. Use schedule timing, repeated error categories, deadline trajectory, and free-text feedback details in the next-cycle generator.
+3. Expand domain knowledge packs and verify named external resources instead of inventing resource names.
+4. Add a long-term goal trajectory model so current-cycle completion does not falsely claim complete mastery.
+5. Validate local-model quality through personal use before allowing it to generate new action structures rather than refine deterministic candidates.
 
 ## Local LLM Boundary
 

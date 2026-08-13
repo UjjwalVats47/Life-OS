@@ -18,6 +18,7 @@ export const exportableTables = [
   "events",
   "financeEntries",
   "freeBlocks",
+  "goalActionFeedback",
   "goalActionPlans",
   "goals",
   "habits",
@@ -72,10 +73,14 @@ export function parseLifeOsExport(rawJson: string): ExportEnvelope {
     throw new Error("This file is not a valid Life OS export.");
   }
 
-  if (parsed.schemaVersion === 2) {
+  if (parsed.schemaVersion === 2 || parsed.schemaVersion === 3) {
     return {
       ...parsed,
-      data: { ...parsed.data, goalActionPlans: [] },
+      data: {
+        ...parsed.data,
+        goalActionFeedback: [],
+        goalActionPlans: parsed.schemaVersion === 2 ? [] : parsed.data.goalActionPlans
+      },
       schemaVersion: currentLocalDbVersion
     };
   }
@@ -118,12 +123,13 @@ function isExportEnvelope(value: unknown): value is ExportEnvelope {
   return (
     candidate.app === "life-os" &&
     candidate.version === 1 &&
-    (candidate.schemaVersion === 2 || candidate.schemaVersion === currentLocalDbVersion) &&
+    (candidate.schemaVersion === 2 || candidate.schemaVersion === 3 || candidate.schemaVersion === currentLocalDbVersion) &&
     typeof candidate.exportedAt === "string" &&
     Boolean(candidate.data) &&
     typeof candidate.data === "object" &&
     exportableTables.every((tableName) =>
-      tableName === "goalActionPlans" && candidate.schemaVersion === 2
+      (tableName === "goalActionPlans" && candidate.schemaVersion === 2) ||
+      (tableName === "goalActionFeedback" && (candidate.schemaVersion === 2 || candidate.schemaVersion === 3))
         ? candidate.data?.[tableName] === undefined || Array.isArray(candidate.data?.[tableName])
         : Array.isArray(candidate.data?.[tableName])
     )

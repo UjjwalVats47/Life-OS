@@ -122,6 +122,7 @@ export async function refineGoalTaskPlanWithOllama(input: {
   let acceptedRefinements = 0;
 
   const tasks = input.deterministic.tasks.map<GeneratedTaskDraft>((task) => {
+    if (task.generationSource === "user_edit" || task.generationSource === "user_feedback") return task;
     const refinement = task.taskKey ? refinementByKey.get(task.taskKey) : undefined;
     if (!refinement) return task;
     const candidate: GeneratedTaskDraft = {

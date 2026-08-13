@@ -1,5 +1,11 @@
 import { getBaseXp } from "@/system/gamification/xpEngine";
-import type { Goal, GoalActionPlan, GoalCapability, TaskTemplate } from "@/types/domain";
+import type {
+  Goal,
+  GoalActionFeedbackReason,
+  GoalActionPlan,
+  GoalCapability,
+  TaskTemplate
+} from "@/types/domain";
 import type { LifeDomain, StatName } from "@/types/enums";
 
 export type GoalTaskHistorySignal = {
@@ -12,7 +18,20 @@ export type GoalTaskHistorySignal = {
   taskKey?: string;
 };
 
+export type GoalTaskFeedbackSignal = {
+  actionType?: TaskTemplate["actionType"];
+  feedbackType: "rejected" | "edited";
+  reasonCode?: GoalActionFeedbackReason;
+  reasonText?: string;
+  revisedCompletionEvidence?: string;
+  revisedEstimatedMinutes?: number;
+  revisedInstructions?: string[];
+  revisedTitle?: string;
+  taskKey: string;
+};
+
 export type GoalTaskIntelligenceInput = {
+  feedback?: GoalTaskFeedbackSignal[];
   goal: Goal;
   history?: GoalTaskHistorySignal[];
   planVersion?: number;
@@ -40,6 +59,7 @@ type RecipeTask = {
   description: string;
   difficulty: TaskTemplate["difficulty"];
   estimatedMinutes: number;
+  generationSource?: TaskTemplate["generationSource"];
   instructions: string[];
   resourceQuery?: string;
   taskKey: string;
@@ -59,6 +79,7 @@ export function generateGoalTaskIntelligence(input: GoalTaskIntelligenceInput): 
   const subject = extractGoalSubject(input.goal.title, archetype);
   const recipe = recipes[archetype];
   const history = input.history ?? [];
+  const feedback = input.feedback ?? [];
   const planVersion = input.planVersion ?? 1;
   const frictionCount = history.filter(
     (item) =>
@@ -73,9 +94,10 @@ export function generateGoalTaskIntelligence(input: GoalTaskIntelligenceInput): 
   );
   const baseRecipeTasks = recipe.tasks(subject);
   const advancingCycle = baseRecipeTasks.length > 0 && baseRecipeTasks.every((task) => completedTaskKeys.has(task.taskKey));
-  const recipeTasks = advancingCycle
+  const cycleTasks = advancingCycle
     ? baseRecipeTasks.map((task) => nextCycleTask(task, planVersion))
     : baseRecipeTasks;
+  const recipeTasks = applyUserFeedback(cycleTasks, feedback);
 
   const tasks = recipeTasks
     .filter((task) => !completedTaskKeys.has(task.taskKey))
@@ -90,7 +112,7 @@ export function generateGoalTaskIntelligence(input: GoalTaskIntelligenceInput): 
         baseXp: getBaseXp(category),
         category,
         domain: input.goal.domain,
-        generationSource: "deterministic",
+        generationSource: adjusted.generationSource ?? "deterministic",
         goalId: input.goal.id,
         sequenceIndex: index + 1,
         specificityScore: scoreGeneratedTaskSpecificity(adjusted),
@@ -105,7 +127,8 @@ export function generateGoalTaskIntelligence(input: GoalTaskIntelligenceInput): 
       assumptions: [
         ...calibrationAssumptions(input.goal, recipe.assumptions),
         ...frictionAssumptions(frictionCount),
-        ...performanceAssumptions(history)
+        ...performanceAssumptions(history),
+        ...feedbackAssumptions(feedback)
       ],
       capabilities: recipe.capabilities,
       goalId: input.goal.id,
@@ -119,6 +142,103 @@ export function generateGoalTaskIntelligence(input: GoalTaskIntelligenceInput): 
     },
     tasks
   };
+}
+
+function applyUserFeedback(tasks: RecipeTask[], feedback: GoalTaskFeedbackSignal[]) {
+  const latestByTask = new Map<string, GoalTaskFeedbackSignal>();
+  feedback.forEach((item) => latestByTask.set(canonicalTaskKey(item.taskKey), item));
+
+  const adapted = tasks.flatMap((task) => {
+    const signal = latestByTask.get(canonicalTaskKey(task.taskKey));
+    if (!signal) return [task];
+
+    if (signal.feedbackType === "edited") {
+      return [{
+        ...task,
+        completionEvidence: signal.revisedCompletionEvidence?.trim() || task.completionEvidence,
+        estimatedMinutes: clampDuration(signal.revisedEstimatedMinutes ?? task.estimatedMinutes),
+        generationSource: "user_edit" as const,
+        instructions: signal.revisedInstructions?.filter((item) => item.trim()).map((item) => item.trim()) || task.instructions,
+        title: signal.revisedTitle?.trim() || task.title
+      }];
+    }
+
+    if (signal.reasonCode === "not_relevant" || signal.reasonCode === "other") return [];
+    if (signal.reasonCode === "too_long") {
+      return [{
+        ...task,
+        completionEvidence: `${task.completionEvidence} Minimum acceptable proof: finish the first defined unit.`,
+        description: `${task.description} User feedback requires a shorter execution unit.`,
+        estimatedMinutes: clampDuration(Math.round(task.estimatedMinutes * 0.6 / 5) * 5),
+        generationSource: "user_feedback" as const,
+        instructions: [...task.instructions, "Stop after the minimum proof; the remaining work belongs in a later action."]
+      }];
+    }
+    if (signal.reasonCode === "too_difficult") {
+      return [{
+        ...task,
+        description: `${task.description} User feedback requires a scaffolded version.`,
+        difficulty: decreaseDifficulty(task.difficulty),
+        generationSource: "user_feedback" as const,
+        instructions: [...task.instructions, "Begin with one worked example, then complete one equivalent unit independently."]
+      }];
+    }
+    if (signal.reasonCode === "too_easy") {
+      return [{
+        ...task,
+        description: `${task.description} User feedback permits a harder version.`,
+        difficulty: increaseDifficulty(task.difficulty),
+        generationSource: "user_feedback" as const,
+        instructions: [...task.instructions, "Increase the difficulty or independence while keeping the same completion proof."]
+      }];
+    }
+    if (signal.reasonCode === "resource_unavailable") {
+      return [{
+        ...task,
+        description: `${task.description} The previously suggested resource is unavailable.`,
+        generationSource: "user_feedback" as const,
+        instructions: [...task.instructions, "Use only a resource already declared by the user or choose a free equivalent."],
+        resourceQuery: undefined
+      }];
+    }
+    if (signal.reasonCode === "unclear") {
+      return [{
+        ...task,
+        description: `${task.description} The action has been clarified after user feedback.`,
+        generationSource: "user_feedback" as const,
+        instructions: ["Before starting, state the exact item or resource you will use.", ...task.instructions]
+      }];
+    }
+    return [task];
+  });
+
+  const survivingKeys = new Set(adapted.map((task) => task.taskKey));
+  return adapted.map((task) => ({
+    ...task,
+    dependencyTaskKeys: task.dependencyTaskKeys?.filter((dependency) => survivingKeys.has(dependency))
+  }));
+}
+
+function feedbackAssumptions(feedback: GoalTaskFeedbackSignal[]) {
+  const latestByTask = new Map<string, GoalTaskFeedbackSignal>();
+  feedback.forEach((item) => latestByTask.set(canonicalTaskKey(item.taskKey), item));
+  const active = [...latestByTask.values()];
+  const assumptions: string[] = [];
+  if (active.some((item) => item.feedbackType === "edited")) {
+    assumptions.push("User-edited action definitions are preserved across generation cycles.");
+  }
+  if (active.some((item) => item.feedbackType === "rejected")) {
+    assumptions.push("Rejected System actions are adapted or suppressed without counting as execution failure.");
+  }
+  return assumptions;
+}
+
+function canonicalTaskKey(taskKey: string) {
+  return taskKey.replace(/-cycle-\d+$/, "");
+}
+
+function clampDuration(minutes: number) {
+  return Math.max(5, Math.min(180, Math.round(minutes)));
 }
 
 function adaptForEvidence(task: RecipeTask, history: GoalTaskHistorySignal[]): RecipeTask {

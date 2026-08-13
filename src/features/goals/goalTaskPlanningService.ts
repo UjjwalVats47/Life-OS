@@ -5,21 +5,45 @@ import { createId } from "@/lib/ids";
 import {
   generateGoalTaskIntelligence,
   isGeneratedTaskEligible,
+  scoreGeneratedTaskSpecificity,
   validateGeneratedTask,
+  type GoalTaskFeedbackSignal,
   type GoalTaskHistorySignal
 } from "@/system/tasks/goalTaskIntelligenceEngine";
 import { selectBestTaskOptions } from "@/system/tasks/taskGenerationEngine";
 import { syncWorkItemsFromExistingData } from "@/system/work/workItemEngine";
 import { loadAiSettings } from "@/features/settings/settingsService";
 import { refineGoalTaskPlanWithOllama } from "@/system/ai/ollamaGoalTaskAdapter";
-import type { Goal, GoalActionPlan, QuestSlot, QuestSlotOption, TaskTemplate } from "@/types/domain";
+import type {
+  Goal,
+  GoalActionFeedback,
+  GoalActionFeedbackReason,
+  GoalActionPlan,
+  QuestSlot,
+  QuestSlotOption,
+  TaskTemplate
+} from "@/types/domain";
 
 export type GoalTaskPlanView = {
   completedActions: number;
+  completedTaskIds: string[];
+  feedbackCount: number;
   goal: Goal;
   plan?: GoalActionPlan;
   tasks: TaskTemplate[];
   totalActions: number;
+};
+
+export type GeneratedActionEditInput = {
+  completionEvidence: string;
+  estimatedMinutes: number;
+  instructions: string[];
+  title: string;
+};
+
+export type GeneratedActionRejectionInput = {
+  reasonCode: GoalActionFeedbackReason;
+  reasonText?: string;
 };
 
 export type GoalCalibrationInput = {
@@ -45,11 +69,12 @@ export async function updateGoalCalibration(goalId: string, input: GoalCalibrati
 
 export async function loadGoalTaskPlans(): Promise<GoalTaskPlanView[]> {
   const userId = defaultUserProfileId;
-  const [goals, plans, tasks, attempts] = await Promise.all([
+  const [goals, plans, tasks, attempts, feedback] = await Promise.all([
     db.goals.where("userId").equals(userId).toArray(),
     db.goalActionPlans.where("userId").equals(userId).toArray(),
     db.taskTemplates.where("userId").equals(userId).toArray(),
-    db.taskAttempts.where("userId").equals(userId).toArray()
+    db.taskAttempts.where("userId").equals(userId).toArray(),
+    db.goalActionFeedback.where("userId").equals(userId).toArray()
   ]);
   const completedTemplateIds = new Set(
     attempts.filter((attempt) => attempt.status === "completed").map((attempt) => attempt.taskTemplateId)
@@ -67,6 +92,8 @@ export async function loadGoalTaskPlans(): Promise<GoalTaskPlanView[]> {
         .sort((a, b) => (a.sequenceIndex ?? 99) - (b.sequenceIndex ?? 99));
       return {
         completedActions: planTasks.filter((task) => completedTemplateIds.has(task.id)).length,
+        completedTaskIds: planTasks.filter((task) => completedTemplateIds.has(task.id)).map((task) => task.id),
+        feedbackCount: feedback.filter((item) => item.goalId === goal.id).length,
         goal,
         plan,
         tasks: planTasks,
@@ -75,15 +102,77 @@ export async function loadGoalTaskPlans(): Promise<GoalTaskPlanView[]> {
     });
 }
 
+export async function editGeneratedAction(taskTemplateId: string, input: GeneratedActionEditInput) {
+  const task = await loadEditableAction(taskTemplateId);
+  const title = input.title.trim();
+  const completionEvidence = input.completionEvidence.trim();
+  const instructions = input.instructions.map((item) => item.trim()).filter(Boolean);
+  const candidate: TaskTemplate = {
+    ...task,
+    completionEvidence,
+    estimatedMinutes: Math.round(input.estimatedMinutes),
+    generationSource: "user_edit",
+    instructions,
+    specificityScore: 0,
+    title
+  };
+  candidate.specificityScore = scoreGeneratedTaskSpecificity(candidate);
+  const validation = validateGeneratedTask(candidate);
+  if (!validation.valid) throw new Error(`The edited action is not executable: ${validation.issues.join(", ")}.`);
+
+  const timestamp = nowIso();
+  const feedback = createFeedbackRecord(task, {
+    feedbackType: "edited",
+    revisedCompletionEvidence: completionEvidence,
+    revisedEstimatedMinutes: candidate.estimatedMinutes,
+    revisedInstructions: instructions,
+    revisedTitle: title
+  });
+  await db.transaction("rw", [db.goalActionFeedback, db.taskTemplates], async () => {
+    await db.goalActionFeedback.put(feedback);
+    await db.taskTemplates.update(task.id, {
+      completionEvidence,
+      estimatedMinutes: candidate.estimatedMinutes,
+      generationSource: "user_edit",
+      instructions,
+      specificityScore: candidate.specificityScore,
+      title,
+      updatedAt: timestamp
+    });
+  });
+  await rebuildTodayQuestBoard();
+  return task.goalId;
+}
+
+export async function rejectGeneratedAction(taskTemplateId: string, input: GeneratedActionRejectionInput) {
+  const task = await loadEditableAction(taskTemplateId);
+  const feedback = createFeedbackRecord(task, {
+    feedbackType: "rejected",
+    reasonCode: input.reasonCode,
+    reasonText: input.reasonText?.trim() || undefined
+  });
+  await db.goalActionFeedback.put(feedback);
+  return regenerateGoalTaskPlan(task.goalId!);
+}
+
+export async function resetGoalActionFeedback(goalId: string) {
+  const goal = await db.goals.get(goalId);
+  if (!goal || goal.userId !== defaultUserProfileId) throw new Error("Goal was not found.");
+  const feedback = await db.goalActionFeedback.where("goalId").equals(goalId).toArray();
+  if (feedback.length) await db.goalActionFeedback.bulkDelete(feedback.map((item) => item.id));
+  return regenerateGoalTaskPlan(goalId);
+}
+
 export async function regenerateGoalTaskPlan(goalId: string) {
   const userId = defaultUserProfileId;
   const goal = await db.goals.get(goalId);
   if (!goal || goal.userId !== userId) throw new Error("Goal was not found.");
 
-  const [existingPlans, existingTemplates, attempts] = await Promise.all([
+  const [existingPlans, existingTemplates, attempts, feedbackRecords] = await Promise.all([
     db.goalActionPlans.where("goalId").equals(goalId).toArray(),
     db.taskTemplates.where("goalId").equals(goalId).toArray(),
-    db.taskAttempts.where("userId").equals(userId).toArray()
+    db.taskAttempts.where("userId").equals(userId).toArray(),
+    db.goalActionFeedback.where("goalId").equals(goalId).toArray()
   ]);
   const templateById = new Map(existingTemplates.map((template) => [template.id, template]));
   const history = attempts
@@ -106,7 +195,20 @@ export async function regenerateGoalTaskPlan(goalId: string) {
       taskKey: templateById.get(attempt.taskTemplateId)?.taskKey
     }));
   const version = Math.max(0, ...existingPlans.map((plan) => plan.version)) + 1;
-  const deterministic = generateGoalTaskIntelligence({ goal, history, planVersion: version });
+  const feedback = feedbackRecords
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .map<GoalTaskFeedbackSignal>((item) => ({
+      actionType: item.actionType,
+      feedbackType: item.feedbackType,
+      reasonCode: item.reasonCode,
+      reasonText: item.reasonText,
+      revisedCompletionEvidence: item.revisedCompletionEvidence,
+      revisedEstimatedMinutes: item.revisedEstimatedMinutes,
+      revisedInstructions: item.revisedInstructions,
+      revisedTitle: item.revisedTitle,
+      taskKey: item.taskKey
+    }));
+  const deterministic = generateGoalTaskIntelligence({ feedback, goal, history, planVersion: version });
   const aiSettings = await loadAiSettings();
   let generated = deterministic;
   let localAiStatus: "disabled" | "refined" | "fallback" = "disabled";
@@ -324,6 +426,58 @@ export async function rebuildTodayQuestBoard() {
 function buildSystemReason(scoreReason: string, template: TaskTemplate) {
   const parts = [scoreReason, template.description, template.completionEvidence ? `Proof: ${template.completionEvidence}` : undefined];
   return parts.filter(Boolean).join(". ");
+}
+
+async function loadEditableAction(
+  taskTemplateId: string
+): Promise<TaskTemplate & { goalId: string; goalPlanId: string; taskKey: string }> {
+  const task = await db.taskTemplates.get(taskTemplateId);
+  if (!task || task.userId !== defaultUserProfileId || !task.goalId || !task.goalPlanId || !task.taskKey) {
+    throw new Error("Generated action was not found.");
+  }
+  const attempts = await db.taskAttempts.where("taskTemplateId").equals(task.id).toArray();
+  if (attempts.some((attempt) => attempt.status === "started" || attempt.status === "completed")) {
+    throw new Error("A started or completed action cannot be edited or rejected. Its execution evidence must remain intact.");
+  }
+  return task as TaskTemplate & { goalId: string; goalPlanId: string; taskKey: string };
+}
+
+function createFeedbackRecord(
+  task: TaskTemplate & { goalId: string; goalPlanId: string; taskKey: string },
+  input: Pick<
+    GoalActionFeedback,
+    | "feedbackType"
+    | "reasonCode"
+    | "reasonText"
+    | "revisedCompletionEvidence"
+    | "revisedEstimatedMinutes"
+    | "revisedInstructions"
+    | "revisedTitle"
+  >
+): GoalActionFeedback {
+  const timestamp = nowIso();
+  return {
+    actionType: task.actionType,
+    createdAt: timestamp,
+    feedbackType: input.feedbackType,
+    goalId: task.goalId,
+    goalPlanId: task.goalPlanId,
+    id: createId(),
+    originalCompletionEvidence: task.completionEvidence ?? "",
+    originalEstimatedMinutes: task.estimatedMinutes,
+    originalInstructions: task.instructions ?? [],
+    originalTitle: task.title,
+    reasonCode: input.reasonCode,
+    reasonText: input.reasonText,
+    revisedCompletionEvidence: input.revisedCompletionEvidence,
+    revisedEstimatedMinutes: input.revisedEstimatedMinutes,
+    revisedInstructions: input.revisedInstructions,
+    revisedTitle: input.revisedTitle,
+    taskKey: task.taskKey,
+    taskTemplateId: task.id,
+    updatedAt: timestamp,
+    userId: task.userId
+  };
 }
 
 function cleanOptional(value: string) {

@@ -1,2 +1,2 @@
 export const databaseName = "LifeOsLocalDb";
-export const databaseVersion = 3;
+export const databaseVersion = 4;

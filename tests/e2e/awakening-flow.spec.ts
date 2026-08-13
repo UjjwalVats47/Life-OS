@@ -34,6 +34,20 @@ test("awakens a local protocol and completes the first quest", async ({ page }) 
   await expect(page.getByText("Action engine", { exact: true })).toBeVisible();
   await expect(page.getByText(/practice set with solutions/i).first()).toBeVisible();
 
+  await page.getByRole("button", { name: /Edit Find and save one .*practice set with solutions/i }).click();
+  await page.getByLabel("Action title").fill("Find and save one beginner coding set with ten solved questions");
+  await page.getByRole("button", { name: "Save action" }).click();
+  await expect(page.getByText(/preference will be reused/i)).toBeVisible();
+  await expect(page.getByText("Find and save one beginner coding set with ten solved questions")).toBeVisible();
+
+  const rejectableAction = page.getByTitle("Reject generated action").nth(1);
+  await rejectableAction.click();
+  const rejectionPanel = page.locator("article").filter({ has: page.getByLabel("Why is this unsuitable?") }).last();
+  await rejectionPanel.getByLabel("Why is this unsuitable?").selectOption("too_long");
+  await rejectionPanel.getByRole("button", { name: "Reject and adapt" }).click();
+  await expect(page.getByText(/without treating it as execution failure/i)).toBeVisible();
+  await expect(page.getByText(/feedback adjusted/i).first()).toBeVisible();
+
   await page.goto("/dashboard");
   await page.getByRole("link", { name: "Open Quest Board" }).click();
 

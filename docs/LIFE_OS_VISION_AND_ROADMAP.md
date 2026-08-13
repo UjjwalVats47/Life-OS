@@ -1,6 +1,6 @@
 # The System: Life OS - Product Vision And Delivery Roadmap
 
-Updated: 2026-07-29
+Updated: 2026-08-13
 
 This document turns the competitive research into a focused product direction. It replaces the old assumption that the product should grow by adding screens. Life OS should grow by making its transformation loop more accurate, explainable, and useful.
 
@@ -177,7 +177,7 @@ Exit condition: the user can understand what the System observed, why it believe
 Purpose: expand evidence sources without compromising privacy or reliability.
 
 14. Calendar import adapter and conflict preview. **Foundation complete.**
-15. Goal-to-Action Intelligence Engine. **Deterministic, execution-evidence, cycle-adaptation, and optional Ollama foundations complete; personal calibration remains in progress.**
+15. Goal-to-Action Intelligence Engine. **Deterministic generation, execution evidence, rejection/edit learning, cycle adaptation, and optional Ollama foundations complete; type-specific evidence and long-term trajectory remain in progress.**
 16. Manual screen-time entry and ActivityWatch import research prototype.
 17. Encrypted backup design and recovery testing.
 18. Optional local/external AI improvements using explicit context selection.

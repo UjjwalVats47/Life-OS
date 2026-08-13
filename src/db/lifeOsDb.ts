@@ -7,6 +7,7 @@ import type {
   FinanceEntry,
   FreeBlock,
   Goal,
+  GoalActionFeedback,
   GoalActionPlan,
   Habit,
   IdentityPath,
@@ -41,6 +42,7 @@ export class LifeOsDb extends Dexie {
   financeEntries!: Table<FinanceEntry, string>;
   freeBlocks!: Table<FreeBlock, string>;
   goals!: Table<Goal, string>;
+  goalActionFeedback!: Table<GoalActionFeedback, string>;
   goalActionPlans!: Table<GoalActionPlan, string>;
   habits!: Table<Habit, string>;
   identityPaths!: Table<IdentityPath, string>;
@@ -104,6 +106,10 @@ export class LifeOsDb extends Dexie {
 
     this.version(3).stores({
       goalActionPlans: "id, userId, goalId, archetype, status, version, createdAt, updatedAt"
+    });
+
+    this.version(4).stores({
+      goalActionFeedback: "id, userId, goalId, goalPlanId, taskTemplateId, taskKey, feedbackType, reasonCode, createdAt, updatedAt"
     });
   }
 }

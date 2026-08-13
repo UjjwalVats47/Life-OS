@@ -41,13 +41,26 @@ describe("exportImport", () => {
 
   it("upgrades schema 2 backups by adding an empty goal action plan collection", () => {
     const oldData = { ...makeEnvelope().data };
+    delete oldData.goalActionFeedback;
     delete oldData.goalActionPlans;
     const restored = parseLifeOsExport(
       JSON.stringify(makeEnvelope({ data: oldData, schemaVersion: 2 }))
     );
 
     expect(restored.schemaVersion).toBe(currentLocalDbVersion);
+    expect(restored.data.goalActionFeedback).toEqual([]);
     expect(restored.data.goalActionPlans).toEqual([]);
+  });
+
+  it("upgrades schema 3 backups by adding an empty generated-action feedback collection", () => {
+    const oldData = { ...makeEnvelope().data };
+    delete oldData.goalActionFeedback;
+    const restored = parseLifeOsExport(
+      JSON.stringify(makeEnvelope({ data: oldData, schemaVersion: 3 }))
+    );
+
+    expect(restored.schemaVersion).toBe(currentLocalDbVersion);
+    expect(restored.data.goalActionFeedback).toEqual([]);
   });
 
   it("creates filesystem-safe backup names", () => {

@@ -113,4 +113,54 @@ describe("goalTaskIntelligenceEngine", () => {
     expect(debugTask.difficulty).toBe("hard");
     expect(debugTask.instructions.join(" ")).toContain("harder question set");
   });
+
+  it("shortens a rejected action without counting the feedback as execution failure", () => {
+    const normal = generateGoalTaskIntelligence({ goal: codingGoal });
+    const adapted = generateGoalTaskIntelligence({
+      feedback: [{ feedbackType: "rejected", reasonCode: "too_long", taskKey: "coding-output" }],
+      goal: codingGoal,
+      planVersion: 2
+    });
+    const normalOutput = normal.tasks.find((task) => task.taskKey === "coding-output")!;
+    const adaptedOutput = adapted.tasks.find((task) => task.taskKey === "coding-output")!;
+
+    expect(adaptedOutput.estimatedMinutes).toBeLessThan(normalOutput.estimatedMinutes);
+    expect(adaptedOutput.completionEvidence).toContain("Minimum acceptable proof");
+    expect(adapted.plan.assumptions.join(" ")).toContain("without counting as execution failure");
+  });
+
+  it("suppresses an irrelevant action and repairs dependencies that pointed to it", () => {
+    const result = generateGoalTaskIntelligence({
+      feedback: [{ feedbackType: "rejected", reasonCode: "not_relevant", taskKey: "coding-resource" }],
+      goal: codingGoal
+    });
+    const baseline = result.tasks.find((task) => task.taskKey === "coding-baseline")!;
+
+    expect(result.tasks.some((task) => task.taskKey === "coding-resource")).toBe(false);
+    expect(baseline.dependencyTaskKeys).toEqual([]);
+    expect(isGeneratedTaskEligible(baseline as TaskTemplate, new Set())).toBe(true);
+  });
+
+  it("preserves a user edit when generating a later action cycle", () => {
+    const first = generateGoalTaskIntelligence({ goal: codingGoal });
+    const result = generateGoalTaskIntelligence({
+      feedback: [{
+        feedbackType: "edited",
+        revisedCompletionEvidence: "A screenshot and five saved passing solutions exist.",
+        revisedEstimatedMinutes: 35,
+        revisedInstructions: ["Open the saved set.", "Finish exactly five questions and save the results."],
+        revisedTitle: "Finish five saved Python questions and record results",
+        taskKey: "coding-baseline"
+      }],
+      goal: codingGoal,
+      history: first.tasks.map((task) => ({ status: "completed" as const, taskKey: task.taskKey })),
+      planVersion: 2
+    });
+    const edited = result.tasks.find((task) => task.taskKey === "coding-baseline-cycle-2")!;
+
+    expect(edited.title).toBe("Finish five saved Python questions and record results");
+    expect(edited.estimatedMinutes).toBe(35);
+    expect(edited.generationSource).toBe("user_edit");
+    expect(validateGeneratedTask(edited).valid).toBe(true);
+  });
 });

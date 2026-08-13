@@ -1,1 +1,1 @@
-export const currentLocalDbVersion = 3;
+export const currentLocalDbVersion = 4;

@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, ChevronUp, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, ChevronUp, Pencil, RefreshCw, RotateCcw, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatDots } from "@/components/shared/StatDots";
 import {
   loadGoalsIdentity
 } from "@/features/life-areas/lifeAreasService";
 import {
+  editGeneratedAction,
   loadGoalTaskPlans,
+  rejectGeneratedAction,
   regenerateGoalTaskPlan,
+  resetGoalActionFeedback,
   updateGoalCalibration,
   type GoalTaskPlanView
 } from "@/features/goals/goalTaskPlanningService";
-import type { Goal } from "@/types/domain";
+import type { Goal, GoalActionFeedbackReason, TaskTemplate } from "@/types/domain";
 import type { LifeStat } from "@/components/shared/statVisuals";
 
 type GoalState = Awaited<ReturnType<typeof loadGoalsIdentity>>;
@@ -176,6 +179,29 @@ function GoalCard({
               <RefreshCw className={`mr-2 size-3.5 ${generating ? "animate-spin" : ""}`} />
               {taskPlan?.plan ? "Regenerate" : "Generate actions"}
             </Button>
+            {taskPlan?.feedbackCount ? (
+              <button
+                aria-label="Reset action feedback"
+                className="grid size-8 place-items-center border border-systemBlue/25 bg-systemBlue/5 text-slate-400 hover:text-systemCyan"
+                disabled={generating}
+                onClick={async () => {
+                  setGenerating(true);
+                  try {
+                    await resetGoalActionFeedback(goal.id);
+                    setEngineMessage("Action feedback cleared. Default System generation restored.");
+                    await onUpdate();
+                  } catch (error) {
+                    setEngineMessage(error instanceof Error ? error.message : "Feedback could not be reset.");
+                  } finally {
+                    setGenerating(false);
+                  }
+                }}
+                title="Clear saved action edits and rejection preferences"
+                type="button"
+              >
+                <RotateCcw className="size-3.5" />
+              </button>
+            ) : null}
             {taskPlan?.plan ? (
               <button
                 aria-label={expanded ? "Collapse action plan" : "Expand action plan"}
@@ -239,7 +265,13 @@ function GoalCard({
           <p className="mt-2 text-[10px] leading-5 text-slate-500">{engineMessage}</p>
         ) : null}
 
-        {expanded && taskPlan?.plan ? <ActionPlan planView={taskPlan} /> : null}
+        {expanded && taskPlan?.plan ? (
+          <ActionPlan
+            onMessage={setEngineMessage}
+            onUpdate={onUpdate}
+            planView={taskPlan}
+          />
+        ) : null}
       </div>
     </article>
   );
@@ -270,7 +302,15 @@ function CalibrationField({
   );
 }
 
-function ActionPlan({ planView }: { planView: GoalTaskPlanView }) {
+function ActionPlan({
+  onMessage,
+  onUpdate,
+  planView
+}: {
+  onMessage: (message: string) => void;
+  onUpdate: () => Promise<void>;
+  planView: GoalTaskPlanView;
+}) {
   return (
     <div className="mt-3 space-y-3">
       <div className="border border-systemViolet/20 bg-systemViolet/5 p-3">
@@ -298,25 +338,220 @@ function ActionPlan({ planView }: { planView: GoalTaskPlanView }) {
 
       <div className="grid gap-2 md:grid-cols-2">
         {planView.tasks.map((task) => (
-          <article className="border border-systemBlue/15 bg-black/25 p-3" key={task.id}>
-            <div className="flex items-start justify-between gap-3">
-              <p className="text-[12px] font-semibold leading-5 text-slate-100">{task.title}</p>
-              <span className="shrink-0 text-[10px] text-systemCyan">{task.estimatedMinutes}m</span>
-            </div>
-            <p className="mt-2 text-[10px] uppercase tracking-[0.1em] text-systemViolet">
-              {task.actionType?.split("_").join(" ")} | {task.generationSource === "local_ai" ? "local AI" : "local core"}
-            </p>
-            <p className="mt-2 text-[11px] leading-5 text-slate-400">{task.completionEvidence}</p>
-            {task.dependencyTaskKeys?.length ? (
-              <p className="mt-2 text-[10px] text-slate-500">Unlocks after earlier proof</p>
-            ) : (
-              <p className="mt-2 text-[10px] text-systemGreen">Eligible now</p>
-            )}
-          </article>
+          <GeneratedActionCard
+            completed={planView.completedTaskIds.includes(task.id)}
+            key={task.id}
+            onMessage={onMessage}
+            onUpdate={onUpdate}
+            task={task}
+          />
         ))}
       </div>
     </div>
   );
+}
+
+function GeneratedActionCard({
+  completed,
+  onMessage,
+  onUpdate,
+  task
+}: {
+  completed: boolean;
+  onMessage: (message: string) => void;
+  onUpdate: () => Promise<void>;
+  task: TaskTemplate;
+}) {
+  const [mode, setMode] = useState<"edit" | "reject">();
+  const [busy, setBusy] = useState(false);
+  const [edit, setEdit] = useState({
+    completionEvidence: task.completionEvidence ?? "",
+    estimatedMinutes: task.estimatedMinutes,
+    instructions: (task.instructions ?? []).join("\n"),
+    title: task.title
+  });
+  const [rejection, setRejection] = useState<{ reasonCode: GoalActionFeedbackReason; reasonText: string }>({
+    reasonCode: "too_long",
+    reasonText: ""
+  });
+
+  const run = async (operation: () => Promise<unknown>, successMessage: string) => {
+    setBusy(true);
+    try {
+      await operation();
+      onMessage(successMessage);
+      setMode(undefined);
+      await onUpdate();
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : "The action could not be changed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <article className="border border-systemBlue/15 bg-black/25 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-[12px] font-semibold leading-5 text-slate-100">{task.title}</p>
+        <span className="shrink-0 text-[10px] text-systemCyan">{task.estimatedMinutes}m</span>
+      </div>
+      <p className="mt-2 text-[10px] uppercase tracking-[0.1em] text-systemViolet">
+        {task.actionType?.split("_").join(" ")} | {generationLabel(task.generationSource)}
+      </p>
+      <p className="mt-2 text-[11px] leading-5 text-slate-400">{task.completionEvidence}</p>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        {completed ? (
+          <p className="text-[10px] text-systemGreen">Proof completed</p>
+        ) : task.dependencyTaskKeys?.length ? (
+          <p className="text-[10px] text-slate-500">Unlocks after earlier proof</p>
+        ) : (
+          <p className="text-[10px] text-systemGreen">Eligible now</p>
+        )}
+        {!completed ? (
+          <div className="flex gap-1">
+            <button
+              aria-label={`Edit ${task.title}`}
+              className="grid size-7 place-items-center border border-systemBlue/20 text-slate-400 hover:text-systemCyan"
+              onClick={() => setMode(mode === "edit" ? undefined : "edit")}
+              title="Edit generated action"
+              type="button"
+            >
+              <Pencil className="size-3" />
+            </button>
+            <button
+              aria-label={`Reject ${task.title}`}
+              className="grid size-7 place-items-center border border-systemBlue/20 text-slate-400 hover:border-red-400/40 hover:text-red-300"
+              onClick={() => setMode(mode === "reject" ? undefined : "reject")}
+              title="Reject generated action"
+              type="button"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {mode === "edit" ? (
+        <div className="mt-3 grid gap-2 border-t border-systemBlue/15 pt-3">
+          <ActionInput label="Action title" onChange={(value) => setEdit((state) => ({ ...state, title: value }))} value={edit.title} />
+          <div className="grid gap-2 sm:grid-cols-[110px_1fr]">
+            <ActionInput
+              label="Minutes"
+              min={5}
+              onChange={(value) => setEdit((state) => ({ ...state, estimatedMinutes: Number(value) }))}
+              type="number"
+              value={String(edit.estimatedMinutes)}
+            />
+            <ActionInput
+              label="Completion proof"
+              onChange={(value) => setEdit((state) => ({ ...state, completionEvidence: value }))}
+              value={edit.completionEvidence}
+            />
+          </div>
+          <label className="grid gap-1 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+            Steps, one per line
+            <textarea
+              className="min-h-20 border border-systemBlue/20 bg-black/35 p-2 text-[11px] normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
+              onChange={(event) => setEdit((state) => ({ ...state, instructions: event.target.value }))}
+              value={edit.instructions}
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button className="h-8 text-[10px]" onClick={() => setMode(undefined)} variant="ghost">Cancel</Button>
+            <Button
+              className="h-8 text-[10px]"
+              disabled={busy}
+              onClick={() => run(
+                () => editGeneratedAction(task.id, {
+                  completionEvidence: edit.completionEvidence,
+                  estimatedMinutes: edit.estimatedMinutes,
+                  instructions: edit.instructions.split("\n"),
+                  title: edit.title
+                }),
+                "Action edited. This preference will be reused in later cycles."
+              )}
+            >
+              Save action
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {mode === "reject" ? (
+        <div className="mt-3 grid gap-2 border-t border-systemBlue/15 pt-3">
+          <label className="grid gap-1 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+            Why is this unsuitable?
+            <select
+              className="h-9 border border-systemBlue/20 bg-black/35 px-2 text-[11px] normal-case tracking-normal text-slate-100 outline-none"
+              onChange={(event) => setRejection((state) => ({ ...state, reasonCode: event.target.value as GoalActionFeedbackReason }))}
+              value={rejection.reasonCode}
+            >
+              <option value="too_long">Too long</option>
+              <option value="too_difficult">Too difficult</option>
+              <option value="too_easy">Too easy</option>
+              <option value="resource_unavailable">Required resource unavailable</option>
+              <option value="unclear">Instructions unclear</option>
+              <option value="not_relevant">Not relevant to my goal</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <ActionInput
+            label="Optional explanation"
+            onChange={(value) => setRejection((state) => ({ ...state, reasonText: value }))}
+            value={rejection.reasonText}
+          />
+          <div className="flex justify-end gap-2">
+            <Button className="h-8 text-[10px]" onClick={() => setMode(undefined)} variant="ghost">Cancel</Button>
+            <Button
+              className="h-8 text-[10px]"
+              disabled={busy}
+              onClick={() => run(
+                () => rejectGeneratedAction(task.id, rejection),
+                "Feedback recorded. The System regenerated this action cycle without treating it as execution failure."
+              )}
+              variant="secondary"
+            >
+              Reject and adapt
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function ActionInput({
+  label,
+  min,
+  onChange,
+  type = "text",
+  value
+}: {
+  label: string;
+  min?: number;
+  onChange: (value: string) => void;
+  type?: "text" | "number";
+  value: string;
+}) {
+  return (
+    <label className="grid gap-1 text-[9px] uppercase tracking-[0.12em] text-slate-500">
+      {label}
+      <input
+        className="h-9 border border-systemBlue/20 bg-black/35 px-2 text-[11px] normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
+        min={min}
+        onChange={(event) => onChange(event.target.value)}
+        type={type}
+        value={value}
+      />
+    </label>
+  );
+}
+
+function generationLabel(source: TaskTemplate["generationSource"]) {
+  if (source === "local_ai") return "local AI";
+  if (source === "user_edit") return "user adjusted";
+  if (source === "user_feedback") return "feedback adjusted";
+  return "local core";
 }
 
 const statMap: Record<Goal["domain"], LifeStat[]> = {

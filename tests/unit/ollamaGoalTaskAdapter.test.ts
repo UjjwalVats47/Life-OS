@@ -110,4 +110,37 @@ describe("ollamaGoalTaskAdapter", () => {
     expect(result.acceptedRefinements).toBe(0);
     expect(result.tasks[0]).toEqual(original);
   });
+
+  it("does not let the local model overwrite an explicit user adjustment", async () => {
+    const deterministic = generateGoalTaskIntelligence({
+      feedback: [{ feedbackType: "rejected", reasonCode: "too_long", taskKey: "coding-resource" }],
+      goal
+    });
+    const adjusted = deterministic.tasks[0];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          message: {
+            content: JSON.stringify({
+              refinements: [{
+                completionEvidence: "A completely different completion proof supplied by the model.",
+                description: "A model proposal that should not replace explicit user feedback.",
+                estimatedMinutes: 120,
+                instructions: ["Ignore the saved preference.", "Use the longer model version."],
+                taskKey: adjusted.taskKey,
+                title: "Replace the user-adjusted action with a much longer model proposal"
+              }]
+            })
+          }
+        }),
+        { status: 200 }
+      )
+    ));
+
+    const result = await refineGoalTaskPlanWithOllama({ deterministic, goal, model: "phi3:latest" });
+
+    expect(result.acceptedRefinements).toBe(0);
+    expect(result.tasks[0]).toEqual(adjusted);
+    expect(result.tasks[0].generationSource).toBe("user_feedback");
+  });
 });

@@ -87,6 +87,35 @@ export type GoalActionPlan = BaseRecord & {
   version: number;
 };
 
+export type GoalActionFeedbackReason =
+  | "too_long"
+  | "too_difficult"
+  | "too_easy"
+  | "resource_unavailable"
+  | "unclear"
+  | "not_relevant"
+  | "other";
+
+export type GoalActionFeedback = BaseRecord & {
+  actionType?: TaskTemplate["actionType"];
+  feedbackType: "rejected" | "edited";
+  goalId: string;
+  goalPlanId: string;
+  originalCompletionEvidence: string;
+  originalEstimatedMinutes: number;
+  originalInstructions: string[];
+  originalTitle: string;
+  reasonCode?: GoalActionFeedbackReason;
+  reasonText?: string;
+  revisedCompletionEvidence?: string;
+  revisedEstimatedMinutes?: number;
+  revisedInstructions?: string[];
+  revisedTitle?: string;
+  taskKey: string;
+  taskTemplateId: string;
+  userId: string;
+};
+
 export type ScheduleBlock = BaseRecord & {
   blockType: "school" | "work" | "sleep" | "meal" | "commute" | "coaching" | "other";
   dayOfWeek: number;
@@ -158,7 +187,7 @@ export type TaskTemplate = BaseRecord & {
   domain: LifeDomain;
   estimatedMinutes: number;
   eventId?: string;
-  generationSource?: "deterministic" | "local_ai" | "external_ai";
+  generationSource?: "deterministic" | "local_ai" | "external_ai" | "user_edit" | "user_feedback";
   goalId?: string;
   goalPlanId?: string;
   habitId?: string;
