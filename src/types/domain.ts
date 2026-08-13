@@ -116,6 +116,20 @@ export type GoalActionFeedback = BaseRecord & {
   userId: string;
 };
 
+export type TaskEvidenceValue = string | number | boolean;
+
+export type TaskEvidenceField = {
+  key: string;
+  label: string;
+  max?: number;
+  metricRole: "volume" | "quality" | "artifact" | "external_feedback" | "context";
+  min?: number;
+  placeholder?: string;
+  required: boolean;
+  unit?: string;
+  valueType: "number" | "text" | "boolean";
+};
+
 export type ScheduleBlock = BaseRecord & {
   blockType: "school" | "work" | "sleep" | "meal" | "commute" | "coaching" | "other";
   dayOfWeek: number;
@@ -186,6 +200,7 @@ export type TaskTemplate = BaseRecord & {
   difficulty: "easy" | "normal" | "hard" | "very_hard";
   domain: LifeDomain;
   estimatedMinutes: number;
+  evidenceFields?: TaskEvidenceField[];
   eventId?: string;
   generationSource?: "deterministic" | "local_ai" | "external_ai" | "user_edit" | "user_feedback";
   goalId?: string;
@@ -228,6 +243,7 @@ export type TaskAttempt = BaseRecord & {
   completionTiming?: "early" | "on_time" | "late" | "repeated_postponement" | "phase3_negotiated";
   completionProof?: string;
   difficultyFeedback?: "too_easy" | "right" | "too_hard";
+  evidenceValues?: Record<string, TaskEvidenceValue>;
   finishedAt?: string;
   incompleteReason?: string;
   questSlotId: string;

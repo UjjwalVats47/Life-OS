@@ -12,6 +12,7 @@ import {
   type QuestBoardSlotView
 } from "@/features/quest-board/questService";
 import type { LifeStat } from "@/components/shared/statVisuals";
+import type { TaskEvidenceField } from "@/types/domain";
 
 export function QuestBoard() {
   const [slots, setSlots] = useState<QuestBoardSlotView[]>([]);
@@ -20,6 +21,7 @@ export function QuestBoard() {
   const [finishingAttemptId, setFinishingAttemptId] = useState<string>();
   const [finishActualMinutes, setFinishActualMinutes] = useState("");
   const [finishDifficulty, setFinishDifficulty] = useState<"too_easy" | "right" | "too_hard">("right");
+  const [finishEvidenceValues, setFinishEvidenceValues] = useState<Record<string, string>>({});
   const [finishError, setFinishError] = useState("");
   const [finishProof, setFinishProof] = useState("");
   const [finishScore, setFinishScore] = useState("");
@@ -58,6 +60,7 @@ export function QuestBoard() {
         actualMinutes: finishActualMinutes ? Number(finishActualMinutes) : undefined,
         completionProof: finishProof,
         difficultyFeedback: finishDifficulty,
+        evidenceValues: finishEvidenceValues,
         resultScore: finishScore ? Number(finishScore) : undefined,
         resultSummary: finishSummary
       });
@@ -81,12 +84,18 @@ export function QuestBoard() {
     const activeTemplate = view.options.find((option) => option.option.status === "selected")?.template;
     setFinishActualMinutes(String(activeTemplate?.estimatedMinutes ?? ""));
     setFinishError("");
+    setFinishEvidenceValues({});
     setFinishingAttemptId(view.activeAttempt.id);
   }
+
+  const finishingTemplate = slots
+    .find((view) => view.activeAttempt?.id === finishingAttemptId)
+    ?.options.find((option) => option.option.status === "selected")?.template;
 
   function resetFinishEvidence() {
     setFinishActualMinutes("");
     setFinishDifficulty("right");
+    setFinishEvidenceValues({});
     setFinishError("");
     setFinishProof("");
     setFinishScore("");
@@ -243,17 +252,32 @@ export function QuestBoard() {
             </label>
           </div>
           <label className="mt-3 grid gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-            Completion proof
+            Completion note
             <textarea
               className="min-h-20 w-full border border-systemBlue/25 bg-black/35 p-3 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
               onChange={(event) => setFinishProof(event.target.value)}
-              placeholder="What proves completion? Score, saved file, output, count, or result."
+              placeholder="Optional context, observation, or additional proof."
               value={finishProof}
             />
           </label>
+          {finishingTemplate?.evidenceFields?.length ? (
+            <div className="mt-3 border border-systemGreen/20 bg-systemGreen/5 p-3">
+              <p className="text-[9px] uppercase tracking-[0.14em] text-systemGreen">Measured result</p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {finishingTemplate.evidenceFields.map((field) => (
+                  <EvidenceFieldInput
+                    field={field}
+                    key={field.key}
+                    onChange={(value) => setFinishEvidenceValues((state) => ({ ...state, [field.key]: value }))}
+                    value={finishEvidenceValues[field.key] ?? ""}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
           <div className="mt-3 grid gap-3 sm:grid-cols-[120px_1fr]">
             <label className="grid gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
-              Score %
+              Optional score %
               <input
                 className="h-10 border border-systemBlue/25 bg-black/35 px-3 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
                 max="100"
@@ -409,7 +433,60 @@ function QuestDetail({ option }: { option: QuestBoardOptionView }) {
           <p className="mt-2 text-[11px] leading-5 text-slate-200">{option.template.completionEvidence}</p>
         </div>
       ) : null}
+      {option.template.evidenceFields?.length ? (
+        <div className="border border-systemGreen/20 bg-black/25 p-3">
+          <p className="text-[9px] uppercase tracking-[0.14em] text-systemGreen">Result fields</p>
+          <p className="mt-2 text-[11px] leading-5 text-slate-300">
+            {option.template.evidenceFields.map((field) => field.label).join(" | ")}
+          </p>
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function EvidenceFieldInput({
+  field,
+  onChange,
+  value
+}: {
+  field: TaskEvidenceField;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <label className="grid gap-2 text-[10px] uppercase tracking-[0.12em] text-slate-500">
+      {field.label}{field.required ? " *" : ""}
+      {field.valueType === "boolean" ? (
+        <select
+          className="h-10 border border-systemBlue/25 bg-black/35 px-3 text-sm normal-case tracking-normal text-slate-100"
+          onChange={(event) => onChange(event.target.value)}
+          value={value}
+        >
+          <option value="">Select</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      ) : (
+        <div className="relative">
+          <input
+            className="h-10 w-full border border-systemBlue/25 bg-black/35 px-3 pr-16 text-sm normal-case tracking-normal text-slate-100 outline-none focus:border-systemViolet/60"
+            max={field.max}
+            min={field.min}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={field.placeholder}
+            step={field.valueType === "number" ? "any" : undefined}
+            type={field.valueType === "number" ? "number" : "text"}
+            value={value}
+          />
+          {field.unit ? (
+            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[9px] text-slate-500">
+              {field.unit}
+            </span>
+          ) : null}
+        </div>
+      )}
+    </label>
   );
 }
 

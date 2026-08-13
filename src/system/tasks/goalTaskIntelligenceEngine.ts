@@ -1,9 +1,11 @@
 import { getBaseXp } from "@/system/gamification/xpEngine";
+import { createTaskEvidenceFields } from "@/system/tasks/taskEvidenceEngine";
 import type {
   Goal,
   GoalActionFeedbackReason,
   GoalActionPlan,
   GoalCapability,
+  TaskAttempt,
   TaskTemplate
 } from "@/types/domain";
 import type { LifeDomain, StatName } from "@/types/enums";
@@ -16,6 +18,7 @@ export type GoalTaskHistorySignal = {
   resultScore?: number;
   status: "completed" | "postponed" | "skipped" | "incomplete";
   taskKey?: string;
+  evidenceValues?: TaskAttempt["evidenceValues"];
 };
 
 export type GoalTaskFeedbackSignal = {
@@ -112,6 +115,7 @@ export function generateGoalTaskIntelligence(input: GoalTaskIntelligenceInput): 
         baseXp: getBaseXp(category),
         category,
         domain: input.goal.domain,
+        evidenceFields: createTaskEvidenceFields(adjusted.actionType, input.goal.domain),
         generationSource: adjusted.generationSource ?? "deterministic",
         goalId: input.goal.id,
         sequenceIndex: index + 1,
@@ -128,6 +132,7 @@ export function generateGoalTaskIntelligence(input: GoalTaskIntelligenceInput): 
         ...calibrationAssumptions(input.goal, recipe.assumptions),
         ...frictionAssumptions(frictionCount),
         ...performanceAssumptions(history),
+        ...measuredEvidenceAssumptions(history),
         ...feedbackAssumptions(feedback)
       ],
       capabilities: recipe.capabilities,
@@ -283,6 +288,15 @@ function performanceAssumptions(history: GoalTaskHistorySignal[]) {
   return [];
 }
 
+function measuredEvidenceAssumptions(history: GoalTaskHistorySignal[]) {
+  const measured = history.filter(
+    (item) => item.status === "completed" && Object.keys(item.evidenceValues ?? {}).length > 0
+  );
+  return measured.length
+    ? [`${measured.length} completed actions include structured result evidence for later-cycle calibration.`]
+    : [];
+}
+
 function increaseDifficulty(difficulty: RecipeTask["difficulty"]): RecipeTask["difficulty"] {
   const order: RecipeTask["difficulty"][] = ["easy", "normal", "hard", "very_hard"];
   return order[Math.min(order.length - 1, order.indexOf(difficulty) + 1)];
@@ -339,6 +353,7 @@ export function validateGeneratedTask(task: GeneratedTaskDraft) {
   }
   if (!task.completionEvidence?.trim()) issues.push("completion evidence is missing");
   if (!task.instructions?.length) issues.push("execution instructions are missing");
+  if (!task.evidenceFields?.length) issues.push("structured evidence fields are missing");
   if (task.estimatedMinutes < 5 || task.estimatedMinutes > 180) issues.push("duration is outside the schedulable range");
   if ((task.specificityScore ?? 0) < 60) issues.push("specificity is below the required threshold");
   return { issues, valid: issues.length === 0 };

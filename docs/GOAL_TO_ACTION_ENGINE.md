@@ -42,12 +42,18 @@ Goal
 - User-edited titles, durations, steps, and completion proof preserved across later cycles.
 - Completed or started action definitions remain immutable so historical execution evidence is not rewritten.
 - Local AI cannot overwrite explicit user edits or feedback-adjusted actions.
+- Domain-aware evidence contracts generated with each action instead of a universal self-score form.
+- Structured completion measurements for volume, quality, artifacts, external feedback, and execution context.
+- Automatic quality calculation from inspectable ratios such as correct/attempted and resolved/identified.
+- Evidence validation rejects missing required measurements and impossible relationships.
+- Incomplete attempts can retain partial evidence without pretending the action was completed.
+- Structured measurements enter later generation history alongside duration, difficulty, and result quality.
 - Versioned local persistence with schema-2 and schema-3 backup compatibility.
 
 ## Required Next Phases
 
-1. Add type-specific result evidence such as question count, accuracy, distance, repetition count, spending amount, artifact reference, and external feedback.
-2. Use schedule timing, repeated error categories, deadline trajectory, and free-text feedback details in the next-cycle generator.
+1. Use schedule timing, repeated error categories, deadline trajectory, and free-text feedback details in the next-cycle generator.
+2. Add per-capability measurement targets so volume and quality can advance independently.
 3. Expand domain knowledge packs and verify named external resources instead of inventing resource names.
 4. Add a long-term goal trajectory model so current-cycle completion does not falsely claim complete mastery.
 5. Validate local-model quality through personal use before allowing it to generate new action structures rather than refine deterministic candidates.

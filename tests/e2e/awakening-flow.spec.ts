@@ -52,12 +52,18 @@ test("awakens a local protocol and completes the first quest", async ({ page }) 
   await page.getByRole("link", { name: "Open Quest Board" }).click();
 
   await expect(page.getByText("Option 1").first()).toBeVisible();
-  await page.getByRole("button", { name: "Start", exact: true }).first().click();
+  await page
+    .locator("article")
+    .filter({ hasText: "Find and save one beginner coding set with ten solved questions" })
+    .getByRole("button", { name: "Start", exact: true })
+    .click();
   await page.getByRole("button", { name: "Yes, Start" }).click();
   await page.getByRole("button", { name: "Finish" }).click();
+  await page.getByLabel(/Saved resource or location/).fill("local/practice-set.pdf");
+  await page.getByLabel(/Usable items found/).fill("10");
   await page
-    .getByPlaceholder("What proves completion? Score, saved file, output, count, or result.")
-    .fill("Saved the selected resource and recorded the required result.");
+    .getByPlaceholder("Optional context, observation, or additional proof.")
+    .fill("Saved the selected resource and verified that solutions are included.");
   await page.getByRole("button", { name: "Completed" }).click();
   await expect(page.getByText(/Quest complete:/)).toBeVisible();
 

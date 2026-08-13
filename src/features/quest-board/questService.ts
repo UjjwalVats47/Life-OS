@@ -14,6 +14,12 @@ import {
   type GoalLink
 } from "@/system/gamification/xpEngine";
 import { evaluateSkipRequest, getEscalationPhase } from "@/system/tasks/escalationEngine";
+import {
+  deriveEvidenceScore,
+  createTaskEvidenceFields,
+  summarizeEvidence,
+  validateTaskEvidence
+} from "@/system/tasks/taskEvidenceEngine";
 import type {
   Goal,
   QuestSlot,
@@ -37,6 +43,7 @@ export type QuestCompletionDetails = {
   actualMinutes?: number;
   completionProof?: string;
   difficultyFeedback?: TaskAttempt["difficultyFeedback"];
+  evidenceValues?: Record<string, unknown>;
   resultScore?: number;
   resultSummary?: string;
 };
@@ -60,7 +67,7 @@ export async function loadQuestBoard(): Promise<QuestBoardSlotView[]> {
         .sort((a, b) => a.rank - b.rank)
         .map((option) => ({
           option,
-          template: templates.find((template) => template.id === option.taskTemplateId)!
+          template: ensureEvidenceContract(templates.find((template) => template.id === option.taskTemplateId)!)
         }))
         .filter((view) => Boolean(view.template)),
       slot
@@ -159,10 +166,21 @@ export async function finishQuest(
       const template = await db.taskTemplates.get(attempt.taskTemplateId);
       const slot = await db.questSlots.get(attempt.questSlotId);
       if (!template || !slot) throw new Error("Quest data is incomplete.");
-      const completionProof = details.completionProof?.trim();
+      const evidenceFields = ensureEvidenceContract(template).evidenceFields ?? [];
+      const evidence = validateTaskEvidence(
+        evidenceFields,
+        details.evidenceValues,
+        outcome === "completed"
+      );
+      if (!evidence.valid) throw new Error(evidence.errors.join(" "));
+      const completionProof = details.completionProof?.trim() ||
+        (Object.keys(evidence.normalized).length ? summarizeEvidence(evidence.normalized) : undefined);
       const resultSummary = details.resultSummary?.trim();
       const actualMinutes = clampOptional(details.actualMinutes, 1, 720);
-      const resultScore = clampOptional(details.resultScore, 0, 100);
+      const resultScore = deriveEvidenceScore(
+        evidence.normalized,
+        clampOptional(details.resultScore, 0, 100)
+      );
 
       if (outcome === "completed" && template.goalPlanId && !completionProof) {
         throw new Error("Generated actions require a short completion proof.");
@@ -172,6 +190,7 @@ export async function finishQuest(
         await db.taskAttempts.update(attemptId, {
           actualMinutes,
           difficultyFeedback: details.difficultyFeedback,
+          evidenceValues: evidence.normalized,
           finishedAt: timestamp,
           incompleteReason: resultSummary || "Marked incomplete by user",
           resultScore,
@@ -222,6 +241,7 @@ export async function finishQuest(
         completionTiming: "on_time",
         completionProof,
         difficultyFeedback: details.difficultyFeedback,
+        evidenceValues: evidence.normalized,
         finishedAt: timestamp,
         resultScore,
         resultSummary,
@@ -405,4 +425,12 @@ function addMinutes(startTime: string, durationMinutes: number) {
 function clampOptional(value: number | undefined, minimum: number, maximum: number) {
   if (value === undefined || !Number.isFinite(value)) return undefined;
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
+}
+
+function ensureEvidenceContract(template: TaskTemplate) {
+  if (!template || template.evidenceFields?.length || !template.goalPlanId) return template;
+  return {
+    ...template,
+    evidenceFields: createTaskEvidenceFields(template.actionType, template.domain)
+  };
 }

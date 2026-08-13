@@ -189,6 +189,7 @@ export async function regenerateGoalTaskPlan(goalId: string) {
       actualMinutes: attempt.actualMinutes,
       actionType: templateById.get(attempt.taskTemplateId)?.actionType,
       difficultyFeedback: attempt.difficultyFeedback,
+      evidenceValues: attempt.evidenceValues,
       plannedMinutes: templateById.get(attempt.taskTemplateId)?.estimatedMinutes,
       resultScore: attempt.resultScore,
       status: toHistoryStatus(attempt.status),

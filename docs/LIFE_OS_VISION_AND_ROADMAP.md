@@ -177,7 +177,7 @@ Exit condition: the user can understand what the System observed, why it believe
 Purpose: expand evidence sources without compromising privacy or reliability.
 
 14. Calendar import adapter and conflict preview. **Foundation complete.**
-15. Goal-to-Action Intelligence Engine. **Deterministic generation, execution evidence, rejection/edit learning, cycle adaptation, and optional Ollama foundations complete; type-specific evidence and long-term trajectory remain in progress.**
+15. Goal-to-Action Intelligence Engine. **Deterministic generation, structured domain evidence, rejection/edit learning, cycle adaptation, and optional Ollama foundations complete; cross-signal adaptation and long-term trajectory remain in progress.**
 16. Manual screen-time entry and ActivityWatch import research prototype.
 17. Encrypted backup design and recovery testing.
 18. Optional local/external AI improvements using explicit context selection.

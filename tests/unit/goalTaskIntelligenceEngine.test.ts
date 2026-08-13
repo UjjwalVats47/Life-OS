@@ -36,6 +36,7 @@ describe("goalTaskIntelligenceEngine", () => {
     expect(result.tasks.some((task) => task.title.includes("practice set with solutions"))).toBe(true);
     expect(result.tasks.every((task) => validateGeneratedTask(task).valid)).toBe(true);
     expect(result.tasks.every((task) => Boolean(task.completionEvidence))).toBe(true);
+    expect(result.tasks.every((task) => Boolean(task.evidenceFields?.length))).toBe(true);
   });
 
   it("keeps dependent work locked until its proof task is completed", () => {
@@ -112,6 +113,22 @@ describe("goalTaskIntelligenceEngine", () => {
 
     expect(debugTask.difficulty).toBe("hard");
     expect(debugTask.instructions.join(" ")).toContain("harder question set");
+  });
+
+  it("records measured-evidence availability in the next plan assumptions", () => {
+    const result = generateGoalTaskIntelligence({
+      goal: codingGoal,
+      history: [{
+        actionType: "baseline_assessment",
+        evidenceValues: { items_attempted: 10, items_correct: 7 },
+        resultScore: 70,
+        status: "completed",
+        taskKey: "prior-baseline"
+      }],
+      planVersion: 2
+    });
+
+    expect(result.plan.assumptions.join(" ")).toContain("structured result evidence");
   });
 
   it("shortens a rejected action without counting the feedback as execution failure", () => {
